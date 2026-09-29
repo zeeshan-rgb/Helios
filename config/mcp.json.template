@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "computer": {
+      "command": "__CUA_DRIVER_BIN__",
+      "args": ["mcp"],
+      "env": { "CUA_DRIVER_RS_TELEMETRY_ENABLED": "0" }
+    },
+    "helios": {
+      "command": "__VENV_PYTHONW__",
+      "args": ["__REPO__/mcp/helios_server.py"]
+    }
+  }
+}

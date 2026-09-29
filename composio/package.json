@@ -1,0 +1,10 @@
+{
+  "name": "helios-composio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Mints a Composio Tool Router MCP URL for Helios",
+  "dependencies": {
+    "@composio/core": "^0.11.0"
+  }
+}

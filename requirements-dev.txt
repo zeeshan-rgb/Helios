@@ -1,0 +1,9 @@
+# Helios — development/test dependencies (NOT needed at runtime).
+# Install:  .venv\Scripts\python -m pip install -r requirements-dev.txt
+# Run:      tools\run_tests.ps1   (or: .venv\Scripts\python -m pytest tests -q  FROM the repo root —
+#           running pytest from elsewhere recursively collects the .venv and segfaults on a pywin32
+#           COM test, so always scope it to tests/)
+# The suite covers Helios's pure decision functions (permissions / router / voice.intent) — fast,
+# offline, no app / mic / claude. See tools/SMOKE.md for the manual live-system checklist.
+
+pytest>=8.0

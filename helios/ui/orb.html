@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HELIOSORB</title>
+  <style>
+    /* Fully transparent page — the three.js canvas (alpha) is the only thing drawn, so the
+       desktop shows through everywhere the orb isn't. The window is clipped to a circle on the
+       Python side (SetWindowRgn) so outside the disc is click-through. */
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+                 user-select: none; -webkit-user-select: none; cursor: default; }
+    #root, #orb-mount { width: 100vw; height: 100vh; }
+    /* The whole orb is the drag handle (move the window) AND the click target (toggle dashboard);
+       orb.js disambiguates click vs drag by movement distance. */
+    #orb-mount { -webkit-app-region: drag; }
+    canvas { display: block; }
+  </style>
+  <script src="/static/vendor/react.production.min.js"></script>
+  <script src="/static/vendor/react-dom.production.min.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "/static/vendor/three.module.js" } }
+  </script>
+</head>
+<body class="pywebview-drag-region">
+  <div id="root"></div>
+  <script>window.__HELIOS_TOKEN__ = "__HELIOS_TOKEN__"; window.__ORB_STYLE__ = "__ORB_STYLE__";</script>
+  <script type="module" src="/static/orb.js"></script>
+</body>
+</html>

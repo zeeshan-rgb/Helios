@@ -1,0 +1,6 @@
+{
+  "name": "helios",
+  "description": "Helios's own working-discipline skills — reusable methods the assistant can invoke autonomously when a task calls for them.",
+  "version": "0.1.0",
+  "author": { "name": "Helios" }
+}

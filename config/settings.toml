@@ -1,0 +1,222 @@
+# Helios configuration. Edit freely — Helios reads this fresh on each launch.
+
+[paths]
+# Obsidian vault that serves as Helios's living memory. Blank = ~/Documents/Obsidian Vaults/LocalAI
+# (under YOUR home). `helios onboard` fills this in for you — keep it blank in the committed default.
+vault = "D:/Helios/data/memory"   # moved off C: (2026-09-29); the old vault was copied, not deleted
+# Default working directory for the brain's file/shell actions. Blank = your home directory.
+workspace = ""
+
+[claude]
+# Fallback model if the router is disabled.
+model = "opus"
+# Hard ceiling per turn (seconds) before Helios gives up on a brain turn.
+turn_timeout = 600
+# Cap on agentic tool-rounds per turn (--max-turns): a runaway-loop backstop, set generously so
+# a long computer-use task never hits it in normal work.
+max_turns = 80
+
+[brain]
+# Which engine runs the assistant:
+#   "claude" — the full Claude Code brain (claude -p): computer-use, MCP tools, missions, memory,
+#              and the permission hook. Auth = your Claude login OR an Anthropic API key (set
+#              [anthropic].api_key in config/secrets.toml). Full power; the default.
+#   "antigravity" — Google's official Antigravity CLI (`agy`), signed in with your Google account
+#              (Google AI Pro entitlement; no API key). Helios keeps voice/memory/persona/safety;
+#              agy executes (files, terminal, web, browser, subagents, Helios MCP tools). Every tool
+#              call passes Helios's permission gate. See [antigravity] below. Sign in once: `agy`.
+#   "gemini" — Google's Gemini CLI. NOTE: Google stopped serving personal Google-account (AI Pro/
+#              free) sign-in on the Gemini CLI on 2026-06-18; kept for API-key/enterprise use.
+#   "lite"   — a native OpenAI-compatible loop for non-Claude providers (openrouter/openai/gemini/
+#              ollama/groq). A curated, permission-gated toolset (read/write files, run shell, open
+#              app, web fetch/search, system health, memory, reminders). No computer-use/missions.
+engine = "antigravity"
+# For engine="lite": the provider + model. Keys/base_url live in config/secrets.toml [<provider>].
+provider = "openai"     # openai | openrouter | gemini | ollama | groq
+model = ""              # blank = a sensible default per provider (e.g. gpt-4o / gemini-3.8-flash)
+tools_enabled = true    # let the lite brain call its curated tools (false = plain chat only)
+max_steps = 8           # max tool-call rounds per lite turn
+
+[antigravity]
+# For engine="antigravity". The official agy binary; blank = find `agy` on PATH.
+bin = "D:/Helios/tools/agy/bin/agy.exe"
+model = ""              # live chat model slug (`agy models`); blank = agy's default (Gemini 3.8 Flash High)
+effort = ""             # low | medium | high | max ; blank = agy default
+# Background agents (routines, missions, side tasks) pick a model per router tier:
+light = "gemini-3.8-flash-low"
+medium = "gemini-3.8-flash-medium"
+heavy = "gemini-3.1-pro-high"
+digest_chars = 4000     # cap on the per-turn memory digest (it stays in the conversation = quota)
+# Post-turn memory extraction costs one extra agy run per reply (~24k input tokens of agy's own
+# system prompt). Off until the Phase 4 memory work adds a cheaper path.
+memory_writeback = false
+
+[computer]
+# PC control (cua-driver, official trycua/cua release; installed to D: with telemetry off).
+driver_bin = "D:/Helios/tools/cua/bin/cua-driver.exe"
+
+[gemini]
+# For engine="gemini". The CLI (npm @google/gemini-cli); blank = find `gemini` on PATH.
+bin = "D:/Helios/tools/npm/gemini.cmd"
+# Router tier -> Gemini model. Aliases resolve to the newest models; full names also work.
+light = "flash-lite"
+medium = "flash"
+heavy = "pro"
+model = "auto"          # used when [router].auto = false
+include_dirs = []       # extra folders the file tools may touch (home + vault are always allowed)
+
+[screen]
+# Opt-in screen awareness is toggled at runtime ("watch my screen"). How often to glance:
+interval_min = 10
+
+[agents]
+# Background work (routines, jobs, screen checks) runs as separate "side agent" Claude
+# processes so the orchestrator (your live chat) is never blocked.
+max_parallel = 3       # max side agents running at once
+# Only one agent drives the mouse/keyboard at a time (the "screen lock"):
+screen_wait_sec = 20   # how long an agent waits for the screen before reporting it busy
+idle_ms = 1500         # a side agent treats you as "active" within this many ms of your last
+                       # keyboard/mouse input, and defers its screen actions until you're idle
+# Multi-agent "missions": one supervisor decomposes a goal and spawns a team of worker
+# agents that collaborate on a shared blackboard. Caps keep it from running away:
+max_concurrent = 5         # global cap on mission agents executing at once (across all missions)
+max_depth = 3              # how deep spawning can nest (supervisor=0, its workers=1, ...)
+max_mission_agents = 8     # max total agents a single mission may spawn
+mission_timeout_sec = 1800 # hard ceiling for a whole mission (the supervisor process)
+
+[proactive]
+# Background nudges (battery/disk/downloads). Each alert fires at most once every ~6h.
+enabled = true
+quiet_start = 22       # no alerts from this hour...
+quiet_end = 8          # ...until this hour
+battery_pct = 20       # warn at/below this % when unplugged
+disk_gb = 10           # warn when C: free space drops below this (GB)
+downloads_count = 60   # suggest tidying when Downloads has more than this many items
+
+[router]
+# Automatically pick a Claude model per task (cheap -> capable).
+auto = true
+light  = "haiku"     # quick chat, lookups, trivial edits
+medium = "sonnet"    # normal GUI tasks, moderate coding
+heavy  = "opus"      # complex / multi-step / ambiguous / risky reasoning
+# When heuristics are unsure, ask the light model to triage the tier.
+# Off by default: it adds a classification call (a few seconds) before the turn.
+# Heuristics alone already route automatically with zero added latency.
+triage = false
+# Background memory extraction always uses the light tier.
+
+[startup]
+# Helios auto-starts at logon. With hidden=true it comes up COMPLETELY invisible — no orb, the
+# dashboard hidden — and DORMANT: the mic only listens for the wake gesture (the "hey Helios"
+# wake word is off until woken). The system-tray icon and the summon hotkey still work as a
+# fallback. Waking (by gesture, tray, or hotkey) reveals the orb, opens the dashboard + the apps
+# below, and switches voice to normal. Requires [voice].enabled (the daemon owns the mic).
+hidden = true
+wake_gesture = "double_clap"   # "double_clap" or "none" (none = wake only via tray/hotkey)
+open_on_wake = ["spotify"]     # apps/URIs to launch on wake (the dashboard always opens too).
+                               # "spotify" is only opened if Spotify is actually connected (the
+                               # one-time OAuth via setup / tools/spotify_auth.py) — otherwise it's
+                               # skipped, so a fresh install doesn't pop Spotify open on every wake.
+clap_sensitivity = 0.1         # min absolute clap loudness (0.06 very sensitive .. 0.35 needs a
+                               # loud clap). Detection also adapts to ambient level, so this is
+                               # mostly the floor in a quiet room. A foam windscreen makes claps
+                               # quieter — lower this if claps don't register with it on; raise it
+                               # if typing/noise false-triggers a wake.
+# Spotify: by DEFAULT just open the app (no auto-play). Set spotify_play to a playlist/album/track
+# (a Spotify URI like "spotify:playlist:XXXX" or an open.spotify.com link) to auto-start it on wake.
+# the user's personal "play KB on wake" lives in config/secrets.toml [startup] (gitignored), so the
+# committed default stays "don't auto-play".
+spotify_play = ""
+
+[orb]
+# The desktop orb. `engine` picks the renderer (helios/orb_overlay.py dispatches, falling back
+# down the chain if one fails to start):
+#   webview — three.js + React neural network with UnrealBloom in a transparent WebView2 window.
+#             The pretty one. CAVEAT: WebView2 transparency rides on GPU compositing — if Windows
+#             drops it (battery saver, driver update, RDP) the orb renders as an OPAQUE BOX and
+#             cannot detect that itself. If you see the box, switch to "layered".
+#   layered — pure-Win32 per-pixel-alpha layered window (PIL/numpy renderer). GPU-independent
+#             transparency, real glow. The reliable choice.
+#   tk      — the original tkinter color-key overlay. No alpha/glow, but bulletproof.
+# `style` applies to the webview engine only: bloom (post-processed glow) | glow (cheap shells).
+# `size` = the orb window in px (both engines; the visible disc is ~2/3 of it).
+engine = "webview"
+style = "bloom"
+size = 190
+
+[voice]
+# Voice stack (wake word -> speech-to-text -> brain -> Kokoro TTS), run by the standalone
+# voice daemon (helios/voice/). All on-device, CPU, no cloud. Toggle the whole thing here.
+enabled = true
+# Pluggable engines. Local defaults need no keys; cloud engines read config/secrets.toml
+# [openai]/[groq] (api_key). Cloud TTS/STT trade on-device privacy for quality/speed.
+tts_engine = "kokoro"          # kokoro (local) | openai | groq
+stt_engine = "faster-whisper"  # faster-whisper (local) | openai | groq
+# Speaker verification: reject false wakes from other people/videos by matching a voiceprint.
+# OPT-IN (default false): needs `pip install resemblyzer` (pulls PyTorch, ~500MB) + a one-time
+# enrollment ("hey Helios, enroll speaker"). Turn on only after enrolling, or it will silently
+# reject your own wakes until a voiceprint exists.
+speaker_verify = false         # VOICE LOCK: act only on the enrolled owner's voice (commands, follow-
+                               # ups, spoken permission answers). Enroll: press the talk hotkey and
+                               # say "enroll my voice" — enrolling turns this on automatically.
+speaker_verify_threshold = 0.70  # 0..1; higher = stricter (fewer imposters, but needs clearer voice)
+# Cloud overrides (used only when the matching *_engine is openai/groq):
+# tts_openai_model = "tts-1"        ; tts_openai_voice = "alloy"
+# tts_groq_model   = "playai-tts"   ; tts_groq_voice   = "Fritz-PlayAI"
+# stt_openai_model = "whisper-1"
+# stt_groq_model   = "whisper-large-v3-turbo"
+wake_word = "data/wake/hey_helios.onnx"   # custom model (train it: see HELIOS_SETUP.md). Or an
+                           # openWakeWord pretrained name (alexa, hey_mycroft, ...), or "none".
+                           # If the model is missing, voice still works via double-clap / the summon
+                           # hotkey / push-to-talk, and `helios voice-check` says why.
+wake_threshold = 0.5       # 0..1; higher = fewer false wakes, needs a clearer "hey Helios"
+stt_model = "base.en"      # faster-whisper size: tiny.en (fastest) / base.en / small.en (best)
+stt_prompt = "Helios, Kokoro, Composio, Spotify, enroll speaker, verify speaker"  # custom vocabulary bias for STT
+tts_voice = "am_michael"   # Kokoro voice (chosen 2026-09-29). Others: bm_george, bm_lewis, bm_daniel,
+                           # bm_fable, am_onyx, am_fenrir — samples in Helios\voice-samples
+tts_speed = 1.15           # 0.5..2.0 speaking rate (raised from 1.0 on request: "reading slowly")
+tts_pitch = 1.0            # voice character: <1 deeper (e.g. 0.9), >1 higher; speaking rate is kept
+tts_reverb = 0.0           # 0..1 hall echo (e.g. 0.3 for a "divine" presence); 0 = dry
+tts_lang = "en-us"         # en-us (American, matches am_* voices) or en-gb (bm_* voices)
+# After Helios finishes speaking, keep the mic hot this long for a natural follow-up
+# WITHOUT needing the wake word again (0 disables follow-ups).
+followup_sec = 6
+silence_ms = 1500          # trailing silence (ms) that ends an utterance — 1.5s so the user can pause
+                           # mid-sentence without Helios cutting in (trade-off: ~0.7s slower to reply)
+max_utterance_sec = 15     # hard cap on a single spoken command
+speak_all = false          # also speak replies to dashboard/Telegram turns (not just voice)
+live_transcript = true     # stream a live transcript to the dashboard HUD while you're speaking
+barge_in = true            # let "hey Helios" interrupt Helios mid-sentence (mic stays open while
+                           # speaking). Set false to make speaking uninterruptible if it self-triggers.
+barge_threshold = 0.6      # stricter wake bar WHILE speaking (the open mic hears Helios itself);
+                           # raise toward 0.8 if Helios's own voice false-triggers a barge
+dictation_hotkey = "<ctrl>+<alt>+d"   # push-to-talk: transcribe speech into the focused field
+talk_hotkey = "<ctrl>+<alt>+h"        # talk to Helios: same as saying "hey Helios" (chime, then speak)
+listen_sec = 8             # after a wake word / clap / talk key: seconds to wait for you to start
+
+[server]
+host = "127.0.0.1"
+port = 8769
+
+[hotkeys]
+# pynput GlobalHotKeys syntax.
+summon = "<ctrl>+<alt>+j"
+panic  = "<ctrl>+<alt>+<backspace>"
+
+[autonomy]
+# Permission policy (most logic lives in helios/permissions.py classify()):
+#   AUTONOMOUS: PC control (mouse/keyboard/screen/apps); reading files EXCEPT sensitive
+#     ones; web search/fetch; read-only shell; safe system settings (audio/wifi/display);
+#     creating/editing non-sensitive files; reading connected apps (Gmail/Calendar/Drive/GitHub).
+#   ASK FIRST: modifying shell commands; touching sensitive files (.env/keys/system/browser/
+#     financial); sending/posting (email, GitHub, social); installs; power (sleep/restart/
+#     shutdown); money; camera/mic; permanent deletes of pre-existing files; unknown tools.
+# Permission posture (set by setup's onboarding): "" = normal policy above; "blank" = confirm
+# EVERYTHING not explicitly in `allow` below (the blank-slate onboarding choice).
+mode = ""
+# `allow` below = extra tools ALWAYS auto-approved (override). `always_ask` = always gated.
+allow = ["mcp__computer__screenshot", "mcp__computer__screen_size", "mcp__computer__cursor_pos", "mcp__computer__list_windows", "mcp__computer__focus_window", "mcp__computer__launch_app", "mcp__computer__move", "mcp__computer__click", "mcp__computer__double_click", "mcp__computer__scroll", "mcp__computer__drag", "mcp__computer__type_text", "mcp__computer__press", "Glob", "LS", "WebSearch", "TodoWrite", "Skill", "ToolSearch"]
+# NOTE: WebFetch is intentionally NOT here — it's the read-then-exfiltrate / SSRF vector, so
+# it's gated to 'ask' (and hard-denied for private/loopback targets) in permissions.py.
+# Always ask for these even if a broader rule would allow (substring match on tool name).
+always_ask = []
