@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Helios</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=0.9.1" />
+</head>
+<body>
+  <!-- Holographic open-animation overlay (cyan scan line + edge glow + CRT grid). Inert
+       except while <html> has the .materializing class; see style.css / app.js. -->
+  <div id="holo" aria-hidden="true"><div class="grid"></div><div class="frame"></div><div class="scan"></div></div>
+
+  <div id="app">
+  <!-- Custom Helios title bar. The native Windows frame is removed (frameless window), so
+       this bar both labels the app and acts as the drag handle: .pywebview-drag-region +
+       DRAG_REGION_DIRECT_TARGET_ONLY means dragging the bar's own surface moves the window,
+       while the buttons inside it still click normally. Window controls live at far right. -->
+  <header id="bar" class="pywebview-drag-region">
+    <!-- Power menu (top-left). Distinct from the right-side window controls: the – / ✕ on the
+         right just minimize / hide-to-orb, whereas this controls Helios's life: Sleep (hide
+         everything, go dormant, wake on double-clap) and Shut down (close Helios entirely). -->
+    <div class="powerwrap">
+      <button id="powerbtn" class="iconbtn powerbtn" title="Power" aria-label="Power" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg>
+      </button>
+      <div id="powermenu" class="powermenu hidden" role="menu">
+        <button class="pmitem" id="pm_sleep" role="menuitem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          <span><b>Sleep</b><i>Hide everything · clap twice to wake</i></span></button>
+        <button class="pmitem danger" id="pm_quit" role="menuitem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg>
+          <span><b id="pm_quit_label">Shut down</b><i>Fully close Helios</i></span></button>
+      </div>
+    </div>
+    <div class="brand">
+      <!-- Live micro synapse-cluster status "dot": app.js renders a few linked nodes that barely
+           breathe when idle and quicken while working / listening / speaking. -->
+      <canvas id="dot" class="syndot" width="40" height="40" aria-hidden="true"></canvas>
+      <span class="name">Helios</span>
+      <span class="ver" id="ver"></span>
+      <span class="tag" id="model">—</span>
+      <span class="statswrap">
+        <button id="stats" class="stats" title="Session usage — click for details" aria-haspopup="true" aria-expanded="false"></button>
+        <div id="statspop" class="statspop hidden" role="dialog" aria-label="Session usage"></div>
+      </span>
+      <!-- Persistent reminder while YOLO (all-permissions) mode is on, so it's never invisible. -->
+      <span class="yolobadge hidden" id="yolobadge" title="YOLO mode: all permissions auto-approved for this chat">YOLO</span>
+    </div>
+    <div class="actions">
+      <!-- YOLO mode: auto-approve every Approve/Deny prompt for the current chat (the panic / SSRF /
+           ~/.claude hard-rails still apply). Warning-styled when on; resets on New conversation / panic. -->
+      <button id="yolobtn" class="iconbtn yolobtn" title="YOLO mode — auto-approve all permissions for this chat" aria-label="Toggle YOLO mode" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></button>
+      <button id="micbtn" class="iconbtn micbtn" title="Voice — listening for “hey Helios”" aria-label="Toggle voice" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/><path class="slash" d="M4 3.5l16 17"/></svg>
+        <span class="liveband" aria-hidden="true"></span></button>
+      <button id="newbtn" class="iconbtn" title="New conversation" aria-label="New conversation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button id="histbtn" class="iconbtn" title="Past conversations" aria-label="Past conversations">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></button>
+      <button id="missionbtn" class="iconbtn" title="Agent missions" aria-label="Agent missions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 13.4l7.2 4.2M15.6 6.4l-7.2 4.2"/></svg></button>
+      <button id="workflowbtn" class="iconbtn" title="Workflows" aria-label="Workflows">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M7 11v3a2 2 0 0 0 2 2h4"/></svg></button>
+      <button id="modelsbtn" class="iconbtn" title="3D models" aria-label="3D models">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg></button>
+      <button id="setbtn" class="iconbtn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <button id="panicbtn" class="panic" title="Stop everything (panic)">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg><span>Stop</span></button>
+      <span class="wsep"></span>
+      <button id="minbtn" class="wbtn" title="Minimize" aria-label="Minimize">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+      <button id="closebtn" class="wbtn wclose" title="Hide to orb" aria-label="Hide to orb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+  </header>
+
+  <main id="chat">
+    <!-- Empty state (shown when there are no messages): a LIVING neural emblem (canvas — the
+         orb's sibling, drawn by app.js, reactive to brain/voice state) + greeting + examples.
+         Hidden as soon as a message appears; restored on "New conversation". -->
+    <div id="empty" class="empty">
+      <canvas id="emblem" class="emblem" width="256" height="256" aria-hidden="true"></canvas>
+      <div class="greet" id="greet">How can I help, sir?</div>
+      <div class="greetsub">Type below, or say <b>“Hey&nbsp;Helios”</b></div>
+      <div class="examples">
+        <button class="ex">What can you do?</button>
+        <button class="ex">Open Spotify</button>
+        <button class="ex">What's my battery and disk space?</button>
+        <button class="ex">Remind me to stretch in 30 minutes</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Voice HUD: the bottom-bar analog of the orb. The equalizer is the signature voice element —
+       its bars come alive and shift colour per state (listening=green, thinking=amber,
+       speaking=cyan, dictation=violet). Hidden until a voice interaction is underway. -->
+  <div id="voicehud" class="voicehud hidden" data-state="idle" aria-live="polite">
+    <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    <span class="vmeta">
+      <span class="vstate" id="vstate">Listening</span>
+      <span class="vtext" id="vtext"></span>
+    </span>
+  </div>
+
+  <div id="banner" class="banner hidden"><span class="typing" aria-hidden="true"><i></i><i></i><i></i></span><span id="banner-text">Working…</span></div>
+
+  <footer id="composer">
+    <div class="capsule">
+      <textarea id="input" rows="1" placeholder="Ask Helios…  (Enter to send · Shift+Enter for a new line)"></textarea>
+      <button id="send" title="Send" aria-label="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Permission Approve/Deny stays a centered dialog: it's urgent and blocking by design.
+       Everything browsable (history / missions / workflows / settings) lives in the drawer. -->
+  <div id="modal" class="modal hidden">
+    <div class="card">
+      <h3>Permission requested</h3>
+      <p class="muted small" style="margin:4px 0 10px">Helios wants to do something that isn't pre-approved:</p>
+      <pre id="modal-summary"></pre>
+      <div class="row">
+        <button id="deny" class="ghost">Deny</button>
+        <button id="approve" class="primary">Approve</button>
+      </div>
+    </div>
+  </div>
+  </div><!-- #app -->
+
+  <!-- The drawer: ONE right-hand slide-over hosting History / Missions / Workflows / Settings
+       (app.js swaps the .dview panes + drives #dback / #dtitle / the header actions). The scrim
+       dims the chat but leaves it visible — nothing ever covers the whole surface. -->
+  <div id="scrim" class="scrim hidden"></div>
+  <aside id="drawer" class="drawer" aria-hidden="true">
+    <header class="dhead">
+      <button id="dback" class="iconbtn dback hidden" title="Back" aria-label="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <h3 id="dtitle">—</h3>
+      <span class="dactions">
+        <button id="wfnew" class="primary wfnewbtn hidden">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          New workflow</button>
+      </span>
+      <button id="dclose" class="iconbtn" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </header>
+    <div class="dbody">
+      <div id="histview" class="dview hidden">
+        <div id="histlist" class="histlist"></div>
+      </div>
+      <div id="missionview" class="dview hidden">
+        <div id="missionlist" class="histlist"></div>
+        <div id="missiondetail"></div>
+      </div>
+      <div id="wfview" class="dview hidden">
+        <div id="wflistview">
+          <div class="wfsub">Automations Helios runs for you — on a schedule or on demand.</div>
+          <div id="wflist" class="histlist"></div>
+        </div>
+        <div id="wfdetail" class="hidden"></div>
+        <div id="wfeditor" class="hidden"></div>
+      </div>
+      <!-- 3D Models: .glb models Helios built (Downloads\Helios Work) -> three.js viewer
+           (ui/viewer.js; renderer is lazy + render-on-demand, ~zero idle GPU). -->
+      <div id="modelview" class="dview hidden">
+        <div class="wfsub">Models Helios has built — click one to view. Drag to rotate · wheel to zoom · right-drag to pan.</div>
+        <div id="modelstage" class="modelstage hidden">
+          <canvas id="modelcanvas"></canvas>
+          <div class="modelbar">
+            <span id="modelname"></span>
+            <span id="modelstats" class="muted small"></span>
+            <button id="wireframebtn" class="ghost">Wireframe</button>
+          </div>
+        </div>
+        <div id="modellist" class="histlist"></div>
+      </div>
+      <div id="setview" class="dview hidden">
+        <div class="setgrid">
+          <label class="ck"><input type="checkbox" id="s_router_auto"> Auto model routing</label>
+          <div class="frow"><span>Models (light / medium / heavy)</span>
+            <input id="s_light"><input id="s_medium"><input id="s_heavy"></div>
+          <label class="ck"><input type="checkbox" id="s_pro_enabled"> Proactive alerts</label>
+          <div class="frow"><span>Battery % · Disk GB · Downloads</span>
+            <input id="s_battery" type="number" min="1" max="100"><input id="s_disk" type="number" min="0" step="0.5"><input id="s_downloads" type="number" min="0"></div>
+          <div class="frow"><span>Quiet hours (start · end, 0–23)</span>
+            <input id="s_qs" type="number" min="0" max="23"><input id="s_qe" type="number" min="0" max="23"></div>
+          <div class="frow"><span>Tone</span><input id="s_tone" placeholder="default Helios" style="flex:1"></div>
+
+          <div class="sethead">Voice</div>
+          <label class="ck"><input type="checkbox" id="s_voice_enabled"> Voice (wake word “hey Helios”)</label>
+          <div class="frow"><span>Speaking voice</span>
+            <select id="s_voice_name" style="flex:1">
+              <option value="bm_george">George — British (m)</option>
+              <option value="bm_daniel">Daniel — British (m)</option>
+              <option value="bm_lewis">Lewis — British (m)</option>
+              <option value="bm_fable">Fable — British (m)</option>
+              <option value="bf_emma">Emma — British (f)</option>
+              <option value="bf_isabella">Isabella — British (f)</option>
+              <option value="am_michael">Michael — American (m)</option>
+              <option value="af_heart">Heart — American (f)</option>
+            </select></div>
+          <div class="frow"><span>Speed · Wake sensitivity</span>
+            <input id="s_voice_speed" type="number" min="0.5" max="2" step="0.05">
+            <input id="s_wake_thresh" type="number" min="0.1" max="0.95" step="0.05"></div>
+          <div class="frow"><span>STT model · Follow-up (s)</span>
+            <select id="s_stt_model"><option>tiny.en</option><option>base.en</option><option>small.en</option></select>
+            <input id="s_followup" type="number" min="0" max="30"></div>
+          <label class="ck"><input type="checkbox" id="s_speak_all"> Speak replies to typed messages too</label>
+          <label class="ck"><input type="checkbox" id="s_barge_in"> Let “hey Helios” interrupt while speaking</label>
+          <label class="ck"><input type="checkbox" id="s_live_transcript"> Show live transcript while listening</label>
+          <div class="muted small">Voice on/off applies now; other voice settings take effect when voice next starts (toggle the mic, or restart Helios).</div>
+
+          <div class="sethead">Orb</div>
+          <div class="frow"><span>Renderer</span>
+            <select id="s_orb_engine" style="flex:1">
+              <option value="webview">Neural 3D — three.js (prettiest)</option>
+              <option value="layered">Layered — reliable transparency</option>
+              <option value="tk">Classic — minimal</option>
+            </select></div>
+          <div class="frow"><span>3D style · Size (px)</span>
+            <select id="s_orb_style"><option value="bloom">bloom</option><option value="glow">glow</option></select>
+            <input id="s_orb_size" type="number" min="120" max="500" step="10"></div>
+          <div class="muted small">Applies on save (the orb restarts itself). If the 3D orb ever renders as an opaque box (GPU compositing off), it auto-falls back to Layered for ~6h.</div>
+
+          <div class="sethead">Startup &amp; wake</div>
+          <label class="ck"><input type="checkbox" id="s_start_hidden"> Start hidden &amp; dormant (no orb until woken)</label>
+          <label class="ck"><input type="checkbox" id="s_clap_wake"> Double-clap to wake / summon</label>
+          <div class="frow"><span>Clap sensitivity (0.05–0.4, lower = more sensitive)</span>
+            <input id="s_clap_sens" type="number" min="0.05" max="0.4" step="0.01"></div>
+          <div class="muted small">Apps opened on wake (e.g. Spotify) are set in <code>settings.toml</code> → <code>[startup] open_on_wake</code>. Startup changes apply on next launch.</div>
+
+          <div class="muted small" id="s_info"></div>
+        </div>
+        <div class="row"><button id="setclose" class="ghost">Cancel</button><button id="setsave" class="primary">Save</button></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Resize from any edge/corner. The window is frameless (no native sizing border), so these
+       thin perimeter zones + corner squares drive /window/resize (see app.js); each anchors the
+       opposite edge via pywebview's FixPoint. The SE corner keeps a visible grip glyph. -->
+  <div id="resizeedges" aria-hidden="true">
+    <div class="rz rz-n"  data-edges="n"></div>
+    <div class="rz rz-s"  data-edges="s"></div>
+    <div class="rz rz-e"  data-edges="e"></div>
+    <div class="rz rz-w"  data-edges="w"></div>
+    <div class="rz rz-ne" data-edges="ne"></div>
+    <div class="rz rz-nw" data-edges="nw"></div>
+    <div class="rz rz-sw" data-edges="sw"></div>
+    <div class="rz rz-se" data-edges="se" id="resizegrip" title="Drag to resize">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M11 5L5 11M11 9l-2 2"/></svg>
+    </div>
+  </div>
+
+  <script>window.__HELIOS_TOKEN__ = "__HELIOS_TOKEN__";</script>
+  <!-- Import map for the vendored three.js r170 ES modules (3D viewer only — the orb page
+       keeps its own r160 vendor). Must precede any module script. -->
+  <script type="importmap">
+  {"imports": {"three": "/static/vendor/three170/three.module.min.js",
+               "three/addons/": "/static/vendor/three170/addons/"}}
+  </script>
+  <script src="/static/app.js?v=0.10.0"></script>
+  <script type="module" src="/static/viewer.js?v=0.10.0"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"__VENV_PYTHONW__\" \"__REPO__/hooks/pretooluse.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

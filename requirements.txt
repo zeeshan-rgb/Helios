@@ -1,0 +1,69 @@
+# Helios — local Claude-powered desktop assistant
+# Core runtime dependencies (Python 3.12, Windows)
+
+# --- Claude brain is the external `claude` CLI (no python dep) ---
+
+# --- Lite brain (engine="lite") + cloud voice: OpenAI-compatible client for OpenRouter/OpenAI/
+#     Gemini/Ollama/Groq. Only needed if you pick a non-Claude provider or a cloud TTS/STT engine. ---
+openai>=1.40
+
+# --- CLI installer / onboarding wizard (python setup.py) ---
+rich>=13.7               # styled terminal output (panels, spinners, colour)
+questionary>=2.0         # interactive arrow-key prompts/menus
+
+# Computer-use MCP server
+mcp>=1.2.0,<2             # official Model Context Protocol SDK (provides FastMCP + Image; 2.x renamed it)
+
+# Screen vision + real mouse/keyboard control
+mss>=9.0.1               # fast multi-monitor screenshots
+pyautogui>=0.9.54        # real cursor + keyboard imitation
+pillow>=10.0.0           # image handling (screenshot encode/scale)
+uiautomation>=2.0.18     # Windows UI Automation: list/focus windows, element targeting
+
+# Tray + global hotkeys (summon + panic)
+pystray>=0.19.5
+pynput>=1.7.6
+
+# Chat window (points at the local UI server; optional — falls back to browser)
+pywebview>=5.1
+pythonnet>=3.0.3         # pywebview EdgeChromium/WinForms backend on Windows
+
+# Obsidian memory notes
+python-frontmatter>=1.1.0
+
+# Desktop toast notifications (reminders, alerts, job-done)
+winotify>=1.1.0
+
+# Settings dashboard (comment-preserving TOML edits) + document indexing (RAG)
+tomlkit>=0.13
+pypdf>=4.0
+
+# System doctor (helios/sysdoctor.py): CPU/RAM/disk/process metrics. GPU via nvidia-smi (subprocess),
+# battery/power via Win32/powercfg (no dep).
+psutil>=5.9
+
+# --- Voice stack (helios/voice/, runs in the standalone voice daemon) ---
+# All ONNX/CTranslate2-based — deliberately NO PyTorch, to stay light + CPU-fast.
+sounddevice>=0.5.5       # mic capture + speaker playback (PortAudio, bundled in the wheel)
+soundfile>=0.14          # WAV read/write (offline tests + optional debug dumps)
+onnxruntime>=1.27        # runs the wake-word, Silero VAD, and Kokoro models (CPU)
+numpy>=2.0               # audio buffers
+openwakeword>=0.6.0      # "hey Helios" wake word (pretrained) + bundled Silero VAD (vad.py)
+faster-whisper>=1.2      # speech-to-text (CTranslate2 int8 on CPU)
+kokoro-onnx>=0.5.0       # Kokoro v1.0 TTS (bundles espeak-ng via espeakng-loader)
+# OPTIONAL — speaker verification / voice lock ([voice].speaker_verify). NOT installed by default
+# because it pulls in PyTorch + librosa (~700MB installed). On Windows, webrtcvad has no wheel, so:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install webrtcvad-wheels librosa
+#   pip install resemblyzer --no-deps
+# (speaker_verify.py degrades gracefully — the feature just stays off — when it isn't installed.)
+# Wake/VAD/feature models download once to the openwakeword package dir via
+#   python -c "from openwakeword.utils import download_models; download_models()"
+# Kokoro model assets live in data/voices/ (kokoro-v1.0.onnx + voices-v1.0.bin, gitignored).
+
+# --- 3D design stack (ported from Helios-main, 2026-07-08) -----------------------------
+trimesh>=4.0             # 3D model inspect/measure/convert/render/show (helios/model_3d.py) - numpy-only IO, NO OpenGL
+scipy                    # ConvexHull for the measure stability check
+manifold3d               # trimesh boolean backend (union/difference) - in-app model design
+shapely                  # 2D profiles for trimesh extrude_polygon/sweep_polygon
+cadquery>=2.4            # engineering-grade CAD (OCP BRep kernel: fillets/chamfers/STEP) - LARGE install

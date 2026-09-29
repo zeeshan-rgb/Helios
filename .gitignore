@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# Node (Composio setup helper)
+composio/node_modules/
+
+# Runtime artifacts
+logs/
+data/
+*.log
+
+# SECRETS — Composio Tool Router config holds the API key + session URL. Never commit.
+config/composio_mcp.json
+# SECRETS — tokens (Telegram bot, etc.). Never commit.
+config/secrets.toml
+
+# Per-install generated configs (written from *.template by setup.py with machine-specific
+# paths). The committed *.template files are the source; the concrete files are local-only.
+config/mcp.json
+config/claude_settings.json
+
+# Local working note for Claude Code session handoff (no secrets, but local-only)
+handoff.md
+
+# Claude Code project-local settings + worktrees (machine-specific: enables the telegram
+# plugin only here, holds transient worktrees). Local-only, never committed.
+.claude/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+*.tmp
+.DS_Store
