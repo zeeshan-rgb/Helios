@@ -16,6 +16,7 @@ Commands:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -140,6 +141,35 @@ def cmd_memory(args) -> int:
         print("usage: helios memory [list [category] | search <words> | forget <id or words>]")
         return 2
     print(f"\n(vault: {conf.vault_path()})")
+    return 0
+
+
+def cmd_learn(args) -> int:
+    """Learning loop: `helios learn [YYYY-MM-DD] [--force] [--no-llm] | review | approve <id> |
+    reject <id>`. Learning only adds memory items; new rules/skills wait for `approve`."""
+    _conf()
+    from helios import learning, memory_store
+    args = list(args or [])
+    action = args[0].lower() if args else ""
+    if action == "review":
+        found = learning.review()
+        print(memory_store.format_items(found) if found else "No lessons are waiting for approval.")
+    elif action in ("approve", "reject") and len(args) > 1:
+        it = (learning.approve if action == "approve" else learning.reject)(args[1])
+        print(f"{action.title()}d: {it['text']}" if it else "No pending lesson with that id.")
+        if not it:
+            return 1
+    elif action in ("", "--force", "--no-llm") or re.fullmatch(r"\d{4}-\d{2}-\d{2}", action):
+        day = action if re.fullmatch(r"\d{4}-\d{2}-\d{2}", action) else None
+        res = learning.learn_from_daily(day, use_llm="--no-llm" not in args,
+                                        force="--force" in args)
+        print(learning.format_report(res))
+        if any(r["status"] == "pending" for r in res.get("lessons", [])):
+            print("\nReview with `helios learn review`, then `helios learn approve <id>`.")
+    else:
+        print("usage: helios learn [YYYY-MM-DD] [--force] [--no-llm] | review | "
+              "approve <id> | reject <id>")
+        return 2
     return 0
 
 
@@ -414,6 +444,7 @@ _COMMANDS = {
     "gemini-login": cmd_gemini_login,
     "voice-check": cmd_voice_check,
     "memory": cmd_memory,
+    "learn": cmd_learn,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -427,6 +458,7 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  gemini-login  sign Helios's Gemini brain into your Google account\n"
           "  voice-check   check mic/speaker, TTS, speech-to-text and wake word (--speak to hear it)\n"
           "  memory        list / search / forget what Helios remembers\n"
+          "  learn         learn lessons from today's conversations; review / approve / reject\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

@@ -454,11 +454,20 @@ def remember(text: str, category: str = "auto", project: str = "") -> str:
     decisions | rules | skills | research | auto. Use `project` (e.g. "Maqsusi") for project facts.
     Duplicates are merged; passwords, keys and other secrets are refused and must never be passed."""
     from helios import memory_store
-    res = memory_store.remember(text, category, source=_memory_source(), project=project or None)
-    if res["status"] == "refused":
+    source = _memory_source()
+    # A background agent can't create standing rules/skills on its own: they wait for approval.
+    cat = (category or "auto").strip().lower()
+    if cat == "auto" and not project:
+        cat = memory_store.classify(text)
+    status = "pending" if source != "chat" and cat in ("rules", "skills") else "active"
+    res = memory_store.remember(text, category, source=source, project=project or None,
+                                status=status)
+    if res["status"] in ("refused", "rejected"):
         return f"Not saved: {res['reason']}."
     it = res["item"]
     verb = "Already knew that (refreshed)" if res["status"] == "duplicate" else "Remembered"
+    if (it.get("status") or "active") == "pending":
+        verb = "Proposed (waits for the user's approval)"
     return f"{verb} [{it['category']}]: {it['text']} (id {it['id']})"
 
 
@@ -493,6 +502,32 @@ def forget_memory(ref: str) -> str:
         return ("Several items match — which one should I forget?\n"
                 + memory_store.format_items(res["candidates"]))
     return "Nothing matching that is remembered."
+
+
+@mcp.tool()
+def pending_lessons() -> str:
+    """List lessons Helios learned from past conversations that wait for the user's approval
+    (new rules and skills always do). Read them to the user when they ask what you've learned."""
+    from helios import learning, memory_store
+    found = learning.review()
+    return memory_store.format_items(found) if found else "No lessons are waiting for approval."
+
+
+@mcp.tool()
+def approve_lesson(lesson_id: str) -> str:
+    """Activate one pending lesson (id from pending_lessons) — ONLY when the user explicitly says
+    to keep/approve it. Activation always asks the user first."""
+    from helios import learning
+    it = learning.approve(lesson_id)
+    return f"Approved: {it['text']}" if it else "No pending lesson with that id."
+
+
+@mcp.tool()
+def reject_lesson(lesson_id: str) -> str:
+    """Reject one pending lesson (id from pending_lessons); it won't be proposed again."""
+    from helios import learning
+    it = learning.reject(lesson_id)
+    return f"Rejected: {it['text']}" if it else "No pending lesson with that id."
 
 
 @mcp.tool()

@@ -58,6 +58,7 @@ _HELIOS_ASK = {
     "delete_custom_tool", "delete_routine", "delete_workflow", "rag_clear",   # destructive
     "set_screen_awareness",                                 # privacy/capability toggle
     "run_in_background", "start_mission", "spawn_agent",    # spawn autonomous agents/teams
+    "approve_lesson",       # a learned rule/skill takes effect only with the user's say-so
 }
 # Verb tokens used to classify connected-app (Composio) actions. Matched against the tool id
 # split into tokens (underscore + camelCase) so APP_SEND_X and APPSENDX both gate correctly.

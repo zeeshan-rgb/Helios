@@ -119,11 +119,24 @@ def _parse(path: Path) -> dict | None:
     return meta
 
 
+_FIELDS = ("id", "category", "project", "created", "updated", "source", "seen",
+           "status", "confidence", "evidence")
+STATUSES = ("active", "pending", "rejected")
+
+
+def _one_line(v) -> str:
+    return re.sub(r"\s+", " ", str(v if v is not None else "")).strip()[:300]
+
+
 def _write(item: dict) -> None:
-    lines = ["---"] + [f"{k}: {item.get(k, '')}" for k in
-                       ("id", "category", "project", "created", "updated", "source", "seen")]
+    lines = ["---"] + [f"{k}: {_one_line(item.get(k, ''))}" for k in _FIELDS]
     lines += ["---", "", item["text"], ""]
     Path(item["path"]).write_text("\n".join(lines), encoding="utf-8")
+
+
+def is_active(it: dict) -> bool:
+    """Items written before statuses existed count as active."""
+    return (it.get("status") or "active") == "active"
 
 
 def items(category: str | None = None, project: str | None = None) -> list[dict]:
@@ -159,9 +172,13 @@ def _find_duplicate(text: str, category: str, project: str | None) -> dict | Non
 
 
 def remember(text: str, category: str = "auto", *, source: str = "chat",
-             project: str | None = None) -> dict:
-    """Store one memory. Returns {"status": saved|duplicate|refused, "item": {...}|None,
-    "reason": str}."""
+             project: str | None = None, status: str = "active",
+             confidence: float | None = None, evidence: str = "") -> dict:
+    """Store one memory. Returns {"status": saved|duplicate|refused|rejected, "item": {...}|None,
+    "reason": str}. `status` pending = a learned lesson awaiting the user's approval; an item the
+    user once rejected is never re-proposed ("rejected"), and an explicit remember (active)
+    promotes a pending duplicate."""
+    status = status if status in STATUSES else "active"
     from .memory import _locked_call
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
@@ -181,10 +198,21 @@ def remember(text: str, category: str = "auto", *, source: str = "chat",
     def _do():
         dup = _find_duplicate(text, category, project)
         if dup:
+            old_status = dup.get("status") or "active"
+            if old_status == "rejected" and status != "active":
+                return {"status": "rejected", "item": dup,
+                        "reason": "the user rejected this before — not proposing it again"}
             dup["updated"] = now
             dup["seen"] = int(dup.get("seen", 1)) + 1
             if len(text) > len(dup["text"]):
                 dup["text"] = text          # keep the more complete wording
+            if status == "active":
+                dup["status"] = "active"    # an explicit remember confirms a pending lesson
+            if confidence is not None:
+                try:
+                    dup["confidence"] = f"{max(float(dup.get('confidence') or 0), confidence):.2f}"
+                except ValueError:
+                    dup["confidence"] = f"{confidence:.2f}"
             _write(dup)
             return {"status": "duplicate", "item": dup, "reason": "already known — refreshed"}
         folder = _folder(category, project)
@@ -192,6 +220,9 @@ def remember(text: str, category: str = "auto", *, source: str = "chat",
         iid = f"{category[:4]}-{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:6]}"
         item = {"id": iid, "category": category, "project": _safe_project(project or ""),
                 "created": now, "updated": now, "source": source, "seen": 1, "text": text,
+                "status": status,
+                "confidence": "" if confidence is None else f"{confidence:.2f}",
+                "evidence": evidence,
                 "path": str(folder / f"{_slug(text)}-{iid[-6:]}.md")}
         _write(item)
         return {"status": "saved", "item": item, "reason": ""}
@@ -212,10 +243,34 @@ def _refresh_index() -> None:
         conf.log("memory", f"index refresh failed: {e}")
 
 
+def set_status(item_id: str, status: str) -> dict | None:
+    """Approve (active) / reject / re-queue (pending) one item by id. Returns the item or None."""
+    from .memory import _locked_call
+    if status not in STATUSES:
+        raise ValueError(f"status must be one of {STATUSES}")
+    target = next((it for it in items() if it["id"] == (item_id or "").strip()), None)
+    if target is None:
+        return None
+
+    def _do():
+        target["status"] = status
+        target["updated"] = datetime.now().isoformat(timespec="seconds")
+        _write(target)
+    _locked_call(_do)
+    conf.log("memory", f"status {target['id']} -> {status}")
+    _refresh_index()
+    return target
+
+
+def pending() -> list[dict]:
+    return [it for it in items() if (it.get("status") or "active") == "pending"]
+
+
 def recall(query: str, category: str | None = None, project: str | None = None,
-           limit: int = 8) -> list[dict]:
-    """Keyword + recency ranked search. An empty query lists the most recent items."""
-    pool = items(category, project)
+           limit: int = 8, include_inactive: bool = False) -> list[dict]:
+    """Keyword + recency ranked search over ACTIVE items (pending/rejected lessons are excluded
+    unless include_inactive). An empty query lists the most recent items."""
+    pool = [it for it in items(category, project) if include_inactive or is_active(it)]
     if not (query or "").strip():
         return pool[:limit]
     q = _tokens(query)
@@ -237,7 +292,7 @@ def forget(ref: str) -> dict:
     if not ref:
         return {"deleted": [], "candidates": []}
     exact = [it for it in items() if it["id"] == ref]
-    matches = exact or recall(ref, limit=5)
+    matches = exact or recall(ref, limit=5, include_inactive=True)
     if exact or len(matches) == 1:
         target = matches[0]
 
@@ -255,7 +310,7 @@ def digest_section(message: str) -> str:
     everywhere) plus the items most relevant to this message from the other categories."""
     lines = []
     for cat in ("rules", "preferences"):
-        for it in items(cat)[:25]:
+        for it in [i for i in items(cat) if is_active(i)][:25]:
             lines.append(f"- [{cat[:-1]}] {it['text']}")
     seen = {l for l in lines}
     for it in recall(message, limit=8):
@@ -274,6 +329,10 @@ def format_items(found: list[dict]) -> str:
     out = []
     for it in found:
         where = f" · {it['project']}" if it.get("project") else ""
-        out.append(f"{it['id']} [{it['category']}{where}] {it['text']} "
-                   f"(since {it.get('created', '?')[:10]}, via {it.get('source', '?')})")
+        state = "" if is_active(it) else f" <{it.get('status')}>"
+        conf_ = f", confidence {it['confidence']}" if it.get("confidence") else ""
+        out.append(f"{it['id']} [{it['category']}{where}]{state} {it['text']} "
+                   f"(since {it.get('created', '?')[:10]}, via {it.get('source', '?')}{conf_})")
+        if it.get("evidence"):
+            out.append(f"    evidence: {it['evidence']}")
     return "\n".join(out)

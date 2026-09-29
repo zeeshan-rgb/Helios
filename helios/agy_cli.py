@@ -456,6 +456,8 @@ def complete_json(prompt: str, *, model: str, schema: dict | None = None,
     claude_cli.complete_json: {text, data, session_id, cost, error}; None on failure."""
     from . import claude_cli
     sys_text = (system or "").strip() or "You are a precise assistant."
+    sys_text += ("\n\nThis call has NO tools: every tool call is denied. Do not run commands or "
+                 "read files — answer directly from the text you were given.")
     if schema:
         sys_text += ("\n\nReturn ONLY a single minified JSON object — no prose, no code fences. "
                      "It must satisfy this JSON schema: " + json.dumps(schema))
