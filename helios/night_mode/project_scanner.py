@@ -40,31 +40,24 @@ def sync_projects(ctx: dict) -> Result:
 
 
 def project_summaries(ctx: dict) -> Result:
+    """One line per project: the health verdict + tonight's changes. The detail (rows + potential
+    issues) is the night report's PROJECT HEALTH section, so nothing is repeated here."""
+    from .. import health
     act = projects.active()
     if not act:
         return Result.skipped("no projects configured")
     res = Result()
-    checks = {r["project"]: r for r in ctx.get("checks", [])}
+    reps = {r["project"]: r for r in (ctx.get("health") or health.reports())}
     for p in act:
-        parts = []
-        rep = checks.get(p["name"])
-        if rep and rep["results"]:
-            parts.append(", ".join(
-                f"{r['name']} {'skipped' if r.get('skipped') else ('PASS' if r['ok'] else 'FAIL')}"
-                for r in rep["results"]))
-        elif p["health_checks"]:
-            parts.append("checks not run tonight")
-        else:
-            parts.append("no health checks configured")
+        rep = reps.get(p["name"]) or health.project_report(p)
+        parts = [rep["verdict"]]
+        if rep["issues"]:
+            parts.append(f"{len(rep['issues'])} potential issue(s)")
         c = ctx.get("changes", {}).get(p["name"])
         if c:
             n = len(c["commits"]) + len(c["uncommitted"]) if c["git"] else c.get("files_total", 0)
             parts.append(f"{n} change(s)")
         res.observed.append(f"{p['name']}: " + "; ".join(parts))
-        for reason in projects.attention(p):
-            # manifest problems were suggested by sync_projects; failing checks are in Failed
-            if reason not in p["problems"] and " failing (exit " not in reason:
-                res.suggested.append(f"{p['name']}: {reason}")
-        res.data[p["name"]] = parts
+        res.data[p["name"]] = {"verdict": rep["verdict"], "issues": rep["issues"]}
     res.summary = f"{len(act)} project summary(ies)"
     return res

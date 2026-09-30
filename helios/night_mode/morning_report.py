@@ -64,6 +64,10 @@ def render(record: dict) -> str:
                  f"{len(tasks)} task(s): {counts['ok']} ok, {counts['failed']} failed, "
                  f"{counts['skipped']} skipped · {'online' if record.get('online') else 'OFFLINE'}")
     lines.append("")
+    reps = ((tasks.get("run_checks") or {}).get("data") or {}).get("health")
+    if reps:
+        from .. import health
+        lines += ["## Project health", "", health.format_report(reps, markdown=True).rstrip(), ""]
     sec = collect(record)
     for key, title in SECTIONS + (("skipped", "Skipped"),):
         lines.append(f"## {title}")

@@ -37,7 +37,7 @@ from .common import Result, online, safe_write
 
 TASKS = {
     "sync_projects": (project_scanner.sync_projects, "sync project state"),
-    "run_checks": (test_runner.run, "run configured tests/builds"),
+    "run_checks": (test_runner.run, "project health: configured checks, dependencies, probes"),
     "research": (research_agent.run, "research configured topics"),
     "analyze_conversations": (conversation_analyzer.run, "analyze recent interactions"),
     "extract_memories": (memory_extractor.run, "extract memories / lessons"),
@@ -284,11 +284,26 @@ def _days_since(since: datetime, now: datetime) -> list[str]:
     return days
 
 
-def _panic(since: float = 0.0) -> bool:
-    """A panic stop pressed since `since` (epoch seconds). An older flag is a leftover from the
-    day (it only clears on the user's next message) and must not silently cancel the night."""
+def stop_file() -> Path:
+    return night_dir() / "stop.flag"
+
+
+def request_stop() -> None:
+    """Stop a running Night Mode run (the app's emergency panic, or `helios night stop`). Night
+    Mode deliberately does NOT follow logs/abort.flag: that is a per-reply signal also set by the
+    dashboard's Stop button and by steering messages, and it once cancelled a whole night."""
     try:
-        return conf.ABORT_FLAG.exists() and conf.ABORT_FLAG.stat().st_mtime >= since
+        safe_write(stop_file(), datetime.now().isoformat(timespec="seconds"))
+        conf.log("night", "stop requested")
+    except Exception as e:  # pragma: no cover
+        conf.log("night", f"stop request failed: {e}")
+
+
+def _panic(since: float = 0.0) -> bool:
+    """A Night Mode stop requested since `since` (epoch seconds); an older one is ignored."""
+    try:
+        f = stop_file()
+        return f.exists() and f.stat().st_mtime >= since
     except Exception:
         return False
 
@@ -335,9 +350,8 @@ def _run(key, ws, we, now, *, scheduled, only, wait, emit, stop, sleep) -> dict:
     t_start = time.time()
     try:
         log(f"start ({rec['kind']}; window {ws:%H:%M}-{we:%H:%M})")
-        if conf.ABORT_FLAG.exists():
-            log("note: a panic stop from earlier is still set — only a panic pressed during this "
-                "run stops it")
+        if stop_file().exists():
+            log("note: an older stop request is ignored — only one made during this run stops it")
         steps, problems = plan(ws)
         for p in problems:
             log(f"config: {p}")
@@ -360,7 +374,7 @@ def _run(key, ws, we, now, *, scheduled, only, wait, emit, stop, sleep) -> dict:
                         and not (stop and stop.is_set()):
                     sleep(min(30.0, max(1.0, (at - datetime.now()).total_seconds())))
             if _panic(t_start) or (stop and stop.is_set()):
-                stopped = "panic stop" if _panic(t_start) else "Helios shutting down"
+                stopped = "stop requested" if _panic(t_start) else "Helios shutting down"
                 res, why = Result.skipped(f"stopped ({stopped})"), "stopped"
                 rec["stopped"] = stopped
             elif scheduled and datetime.now() >= we:

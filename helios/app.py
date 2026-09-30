@@ -511,6 +511,11 @@ def main() -> None:
         pool.panic()
         missions.panic()  # kill every running mission supervisor tree
         workflows.panic()  # kill any in-flight workflow step process
+        try:
+            from . import night_mode
+            night_mode.scheduler.request_stop()   # emergency stop also halts a Night Mode run
+        except Exception as e:  # pragma: no cover
+            conf.log("app", f"night mode stop failed: {e}")
         # Everyone's killed now — free the screen lock immediately (don't wait for the
         # ~20s stale-takeover; a force-killed MCP server can't release it itself).
         try:
