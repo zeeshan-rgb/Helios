@@ -25,6 +25,9 @@ from . import conf
 _P = r"(?:^|[/\s\"'=:(])"          # path-ish start
 _E = r"(?:$|[/\s\"',;)])"          # path-ish end
 RULES: list[tuple[str, re.Pattern]] = [(cat, re.compile(rx, re.I)) for cat, rx in [
+    ("Helios/assistant secrets",
+     r"config/secrets\.toml\b|\bcomposio_mcp\.json\b|\.session_token\b|"
+     r"\.claude/\.credentials\.json\b|\boauth_creds\.json\b|\bgoogle_accounts\.json\b"),
     ("SSH keys",
      rf"{_P}\.ssh{_E}|\bid_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?\b|\bauthorized_keys\b"),
     ("password manager data",
@@ -49,9 +52,6 @@ RULES: list[tuple[str, re.Pattern]] = [(cat, re.compile(rx, re.I)) for cat, rx i
      r"application_default_credentials\.json|\.kube/config\b|\.docker/config\.json\b|"
      r"/gh/hosts\.yml\b|\.terraformrc\b|\.terraform\.d/credentials"),
     ("GPG keys", r"\.gnupg\b|/gnupg/|\bsecring\.gpg\b|private-keys-v1\.d"),
-    ("Helios/assistant secrets",
-     r"config/secrets\.toml\b|\bcomposio_mcp\.json\b|\.session_token\b|"
-     r"\.claude/\.credentials\.json\b|\boauth_creds\.json\b|\bgoogle_accounts\.json\b"),
 ]]
 
 # Tool input fields that name a PATH (Grep's `pattern` is content, not a path — never checked).
