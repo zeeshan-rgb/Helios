@@ -139,24 +139,35 @@ def test_scheduled_run_waits_for_task_time_and_honours_stop(env, monkeypatch):
     assert rec["tasks"]["later"]["status"] == "skipped" and "stopped" in rec["tasks"]["later"]["summary"]
 
 
-def test_panic_skips_remaining_tasks(env, monkeypatch):
-    def set_panic(ctx):
-        conf.ABORT_FLAG.write_text("1")
+def test_stop_request_skips_remaining_tasks(env, monkeypatch):
+    def emergency_stop(ctx):
+        sched.request_stop()                       # the app's panic() / `helios night stop`
         return common.Result(summary="first")
-    env.cfg["schedule"] = _fake_tasks(monkeypatch, {"a": set_panic, "b": ok_task()})
+    env.cfg["schedule"] = _fake_tasks(monkeypatch, {"a": emergency_stop, "b": ok_task()})
     rec = sched.run_night()
     assert rec["tasks"]["a"]["status"] == "ok" and rec["tasks"]["b"]["status"] == "skipped"
-    assert rec["status"] == "stopped (panic stop)"
+    assert rec["status"] == "stopped (stop requested)"
 
 
-def test_panic_from_earlier_in_the_day_does_not_cancel_the_night(env, monkeypatch):
+def test_stopping_a_chat_reply_does_not_cancel_the_night(env, monkeypatch):
+    # 2026-09-30: the dashboard Stop button / a steering message sets logs/abort.flag (a per-reply
+    # signal); following it cancelled a real night run. Night Mode must ignore it.
+    def stop_button(ctx):
+        conf.ABORT_FLAG.write_text("stop")
+        return common.Result(summary="first")
+    env.cfg["schedule"] = _fake_tasks(monkeypatch, {"a": stop_button, "b": ok_task()})
+    rec = sched.run_night()
+    assert rec["status"] == "completed" and rec["tasks"]["b"]["status"] == "ok"
+
+
+def test_stop_request_from_earlier_does_not_cancel_the_night(env, monkeypatch):
     env.cfg["schedule"] = _fake_tasks(monkeypatch, {"a": ok_task()})
-    conf.ABORT_FLAG.write_text("stop")
+    sched.request_stop()
     old = datetime.now().timestamp() - 3600
-    os.utime(conf.ABORT_FLAG, (old, old))
+    os.utime(sched.stop_file(), (old, old))
     rec = sched.run_night()
     assert rec["status"] == "completed" and rec["tasks"]["a"]["status"] == "ok"
-    assert any("panic stop from earlier" in l for l in rec["log"])
+    assert any("older stop request is ignored" in l for l in rec["log"])
 
 
 def test_partial_runs_do_not_move_the_since_point(env, monkeypatch):
@@ -299,7 +310,7 @@ def test_full_run_with_real_tasks(env, monkeypatch):
     rec = sched.run_night()
     assert _code_digest() == before                              # Helios's code untouched
     t = rec["tasks"]
-    assert t["run_checks"]["summary"] == "1 passed, 1 failed"
+    assert t["run_checks"]["summary"].startswith("1 passed, 1 failed; 1 failing")
     assert t["research"]["status"] == "ok" and "1 new finding" in t["research"]["summary"]
     assert t["analyze_conversations"]["data"][today]["corrections"] == 1
     assert "1 new lesson" in t["extract_memories"]["summary"]
@@ -309,7 +320,7 @@ def test_full_run_with_real_tasks(env, monkeypatch):
     assert memory_store.recall("MCP streaming") == []              # research stays out of memory
     assert report.count("Keep spoken reports short") == 1          # approvals de-duplicated
     assert memory_store.pending()[0]["text"] == "Keep spoken reports short"   # never auto-approved
-    assert "App: ok PASS, bad FAIL" in report                    # project summary
+    assert "App: FAILING" in report and "### App — FAILING" in report   # summary + health (phase 9)
     assert "bad failing" not in report                           # failures listed once, in Failed
     assert "App bad: FAIL (exit 2, " in report and "s) — \n" not in report
 

@@ -553,27 +553,28 @@ def project_changes(project: str = "", hours: float = 24) -> str:
 
 @mcp.tool()
 def project_health(project: str = "") -> str:
-    """What is broken / which projects need attention, from the last health checks plus git state
-    and manifest problems. Does not run anything — use run_project_checks for fresh results."""
-    from helios import projects
-    if project:
-        p = projects.get(project)
-        if not p:
-            return f"No project called {project!r}."
-        reasons = projects.attention(p)
-        return f"{p['name']}: " + ("; ".join(reasons) if reasons else "looks fine")
-    return ("BROKEN\n" + projects.format_broken() + "\n\nNEEDS ATTENTION\n"
-            + projects.format_attention())
+    """PROJECT HEALTH for one project or all active ones ("what is broken?", "which projects need
+    attention?", "how is Maqsusi doing?"): a verdict (FAILING / ATTENTION / OK / UNKNOWN), rows for
+    build, tests, lint, typecheck, git status, dependencies (+ Helios's runtime/voice/memory where
+    configured) and potential issues. Uses the last results — run_project_checks refreshes them."""
+    from helios import health
+    try:
+        return health.format_report(health.reports(project or None))
+    except KeyError as e:
+        return str(e)
 
 
 @mcp.tool()
 def run_project_checks(project: str = "", check: str = "") -> str:
-    """Run the health checks the user configured for a project (or all active projects): tests,
-    lint, builds exactly as written in the manifest — never push/publish/deploy/delete. Can take
-    minutes; say so before starting."""
-    from helios import projects
+    """Run the health checks the user configured (tests, lint, builds exactly as written in the
+    manifest) plus the dependency check and built-in probes, then report PROJECT HEALTH. `check`
+    runs just one named check. Never pushes/publishes/deploys/deletes. Can take minutes; say so
+    before starting."""
+    from helios import health, projects
     try:
-        return projects.format_checks(projects.run_checks(project or None, check or None))
+        if check:
+            return projects.format_checks(projects.run_checks(project or None, check))
+        return health.format_report(health.run_all(project or None))
     except projects.Busy as e:
         return f"Not started: {e}."
     except KeyError as e:

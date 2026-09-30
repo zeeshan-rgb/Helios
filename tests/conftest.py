@@ -23,6 +23,9 @@ def _isolate_runtime_flags(tmp_path_factory, monkeypatch):
     used to leave a real panic stop behind). Tests that want a flag patch it again themselves."""
     from helios import conf
     d = tmp_path_factory.mktemp("flags")
+    # Test log lines stay out of the real logs/ too: they used to show up as fake "voice errors"
+    # in Helios's own health report.
+    monkeypatch.setattr(conf, "LOGS_DIR", d)
     monkeypatch.setattr(conf, "ABORT_FLAG", d / "abort.flag")
     monkeypatch.setattr(conf, "YOLO_FLAG", d / "yolo.flag")
     monkeypatch.setattr(conf, "SCREEN_LOCK", d / "screen.lock")

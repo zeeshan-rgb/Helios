@@ -439,7 +439,8 @@ def cmd_update(_args) -> int:
 
 def cmd_projects(args) -> int:
     """Project manifests: `helios projects [list [--all] | add <folder> [--name N] [--force] |
-    changes [name] [--hours N] | check [name] [--only CHECK] | health | show <name>]`."""
+    changes [name] [--hours N] | check [name] [--only CHECK] | health [name] [--run] |
+    show <name>]`."""
     conf = _conf()
     from helios import projects
     args = list(args or [])
@@ -469,8 +470,13 @@ def cmd_projects(args) -> int:
             only = opt("--only")
             print(projects.format_checks(projects.run_checks(" ".join(args) or None, only)))
         elif action == "health":
-            print("BROKEN\n" + projects.format_broken() + "\n\nNEEDS ATTENTION\n"
-                  + projects.format_attention())
+            from helios import health
+            run = "--run" in args
+            name = " ".join(a for a in args if a != "--run") or None
+            if run:
+                print("Running checks, dependency checks and probes (this can take a few minutes)...")
+            print("PROJECT HEALTH\n")
+            print(health.format_report(health.run_all(name) if run else health.reports(name)))
         elif action == "show" and args:
             p = projects.get(" ".join(args))
             if not p:
@@ -489,7 +495,7 @@ def cmd_projects(args) -> int:
 
 
 def cmd_night(args) -> int:
-    """Night Mode: `helios night [status | run [--only task1,task2] | report [night] |
+    """Night Mode: `helios night [status | run [--only task1,task2] | report [night] | stop |
     on | off]`. `run` runs every scheduled task right now (a manual run)."""
     conf = _conf()
     from helios import night_mode
@@ -511,6 +517,10 @@ def cmd_night(args) -> int:
         print(f"(report: {rec.get('report')})")
     elif action == "report":
         print(night_mode.latest_report(args[0] if args else None))
+    elif action == "stop":
+        from helios.night_mode import scheduler as night
+        night.request_stop()
+        print("Stop requested — a running Night Mode run stops before its next task.")
     elif action in ("on", "off"):
         conf.update_settings({"night_mode.enabled": action == "on"})
         print(f"Night Mode is now {action.upper()} (restart Helios if it's running).")

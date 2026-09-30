@@ -138,6 +138,22 @@ def _as_list(v) -> list[str]:
     return [str(s).strip() for s in v if str(s).strip()] if isinstance(v, list) else [str(v)]
 
 
+DEPENDENCY_MODES = ("auto", "npm", "pip", "off")
+KINDS = ("build", "test", "lint", "typecheck")
+
+
+def _kind(v) -> str:
+    """Which report row a check belongs to: build / test / lint / typecheck / other."""
+    s = str(v or "").lower()
+    for k, words in (("typecheck", ("typecheck", "type-check", "tsc", "mypy", "pyright")),
+                     ("test", ("test", "pytest", "jest", "vitest")),
+                     ("lint", ("lint", "eslint", "ruff", "flake8")),
+                     ("build", ("build", "assemble", "compile"))):
+        if s == k or any(w in s for w in words):
+            return k
+    return "other"
+
+
 def _timeout(v) -> int:
     try:
         return max(5, min(MAX_TIMEOUT, int(v)))
@@ -164,18 +180,30 @@ def _normalize(raw: dict, file: Path) -> dict:
         if not isinstance(c, dict):
             continue
         run = str(c.get("run") or "").strip()
-        ref = commands.get(run) if run in commands else None       # "run: test" -> commands.test
+        ref_key = run if run in commands else None
+        ref = commands.get(run) if ref_key else None                 # "run: test" -> commands.test
         run = ref or run
         cname = str(c.get("name") or (ref and c.get("run")) or run.split(" ")[0] or f"check{i + 1}")[:40]
         prob = command_problem(run)
         checks.append({"name": cname, "run": run, "timeout": _timeout(c.get("timeout")),
-                       "problem": prob})
+                       "problem": prob, "kind": _kind(c.get("kind") or ref_key or cname)})
         if prob:
             problems.append(f"check {cname}: {prob}")
     try:
         stale = max(1, int(raw.get("stale_days") or DEFAULT_STALE_DAYS))
     except (TypeError, ValueError):
         stale = DEFAULT_STALE_DAYS
+    dv = raw.get("dependencies", "auto")
+    # YAML 1.1 reads a bare off/no as False and on/yes as True.
+    deps = "off" if dv is False else "auto" if dv in (True, None, "") else str(dv).strip().lower()
+    if deps not in DEPENDENCY_MODES:
+        problems.append(f"dependencies: unknown value {deps!r} (use {', '.join(DEPENDENCY_MODES)})")
+        deps = "off"
+    builtin = _as_list(raw.get("builtin_checks"))
+    from . import health
+    for b in [b for b in builtin if b not in health.PROBES]:
+        problems.append(f"builtin_checks: unknown check {b!r} (known: {', '.join(health.PROBES)})")
+    builtin = [b for b in builtin if b in health.PROBES]
     return {
         "name": name, "slug": _slug(name), "path": path, "file": str(file),
         "active": raw.get("active", True) is not False,
@@ -185,6 +213,7 @@ def _normalize(raw: dict, file: Path) -> dict:
         "commands": commands, "health_checks": checks,
         "research_topics": _as_list(raw.get("research_topics")),
         "stale_days": stale, "problems": problems,
+        "dependencies": deps, "builtin_checks": builtin,
         "usable": not (pp or not Path(path).is_dir()) if path else False,
     }
 
@@ -277,13 +306,39 @@ def is_git(path: str) -> bool:
     return (Path(path) / ".git").exists() and _git(path, "rev-parse", "--is-inside-work-tree")[0] == 0
 
 
-def git_state(p: dict) -> dict:
+def git_state(p: dict, *, detail: bool = False) -> dict:
+    """Branch + uncommitted files. detail=True adds (all local, never fetches): commits ahead of /
+    behind the upstream as of the last fetch, the diff size, how old the oldest uncommitted change
+    is, and the last commit."""
     if not p["usable"] or not is_git(p["path"]):
         return {}
     _, branch = _git(p["path"], "rev-parse", "--abbrev-ref", "HEAD")
     code, porcelain = _git(p["path"], "status", "--porcelain=v1")
     changed = [l for l in porcelain.splitlines() if l.strip()] if code == 0 else []
-    return {"branch": branch, "uncommitted": len(changed), "changed_files": changed[:20]}
+    out = {"branch": branch, "uncommitted": len(changed), "changed_files": changed[:20]}
+    if not detail:
+        return out
+    code, lr = _git(p["path"], "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+    if code == 0 and len(lr.split()) == 2:
+        out["ahead"], out["behind"] = (int(x) for x in lr.split())
+    else:
+        out["ahead"] = out["behind"] = None          # no upstream branch configured
+    code, stat = _git(p["path"], "diff", "--shortstat", "HEAD")
+    out["diffstat"] = stat.strip() if code == 0 else ""
+    code, last = _git(p["path"], "log", "-1", "--format=%cI %s")
+    if code == 0 and last:
+        when, _, subject = last.partition(" ")
+        out["last_commit"], out["last_commit_subject"] = when[:19], subject[:100]
+    oldest = None
+    for line in changed[:200]:
+        rel = line[3:].split(" -> ")[-1].strip().strip('"')
+        try:
+            m = os.path.getmtime(os.path.join(p["path"], rel))
+        except OSError:
+            continue
+        oldest = m if oldest is None else min(oldest, m)
+    out["oldest_change_days"] = round((time.time() - oldest) / 86400, 1) if oldest else None
+    return out
 
 
 # ------------------------------------------------------------------------------ changes

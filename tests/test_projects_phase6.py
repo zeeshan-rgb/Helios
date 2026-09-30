@@ -308,9 +308,12 @@ def test_mcp_project_tools(pdir, tmp_path):
     assert "App" in srv.list_projects() and "never checked" in srv.list_projects()
     assert "App" in srv.project_changes()
     assert "never run" in srv.project_health()
-    assert "ok: ok" in srv.run_project_checks("app")
-    assert "looks fine" in srv.project_health("app")
-    assert "No project" in srv.project_health("zzz")
+    # Phase 9: these tools now return the full PROJECT HEALTH report.
+    report = srv.run_project_checks("app")
+    assert "Other checks: ok: PASS" in report and "App — ATTENTION" in report   # no tests configured
+    assert "no tests configured" in srv.project_health("app")
+    assert "ok: ok" in srv.run_project_checks("app", "ok")                     # one named check
+    assert "no project" in srv.project_health("zzz")
     assert "no project" in srv.run_project_checks("zzz")
 
 
