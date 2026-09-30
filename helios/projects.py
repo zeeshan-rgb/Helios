@@ -121,7 +121,8 @@ def path_problem(path: str) -> str | None:
     for r in _sensitive_roots():
         if n == r or n.startswith(r + "/") or r.startswith(n + "/"):
             return "a sensitive location (credentials, keys, browser or system data)"
-    return None
+    from . import protected                       # the one shared list of credential stores
+    return protected.root_problem(str(p))
 
 
 # ------------------------------------------------------------------------------ manifests
@@ -435,7 +436,8 @@ def run_check(p: dict, check: dict) -> dict:
         env = dict(os.environ, CI="1", FORCE_COLOR="0", NO_COLOR="1", PYTHONIOENCODING="utf-8")
         proc = subprocess.Popen(argv, cwd=p["path"], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                                | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0))
         try:
             raw, _ = proc.communicate(timeout=check["timeout"])
             res["code"] = proc.returncode

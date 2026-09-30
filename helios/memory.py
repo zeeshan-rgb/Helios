@@ -110,16 +110,7 @@ def _norm(s: str) -> str:
 # High-precision API-key / token shapes only — redacted before anything is persisted to the
 # vault so a pasted secret can't end up sitting in Profile.md / Daily notes. Deliberately narrow
 # (no generic "password: x") to avoid mangling legitimate prose.
-_SECRET_RE = re.compile(
-    r"(sk-[A-Za-z0-9_-]{16,}"
-    r"|gsk_[A-Za-z0-9]{20,}"
-    r"|csk-[A-Za-z0-9]{16,}"
-    r"|AIza[A-Za-z0-9_-]{20,}"
-    r"|gh[pousr]_[A-Za-z0-9]{20,}"
-    r"|xox[baprs]-[A-Za-z0-9-]{10,}"
-    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}"
-    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"|Bearer\s+[A-Za-z0-9._-]{16,})", re.I)
+_SECRET_RE = conf.SECRET_RE          # one pattern, shared with log redaction (conf.log)
 
 
 def _redact(s: str) -> str:

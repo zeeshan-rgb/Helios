@@ -24,15 +24,21 @@ _MS_PER_WIN = 30
 class Endpointer:
     """Streaming speech endpoint detector. Feed int16 frames; ask if the utterance has ended."""
 
-    def __init__(self, silence_ms: int = 800, on_thresh: float = 0.5, off_thresh: float = 0.35):
+    def __init__(self, silence_ms: int = 800, on_thresh: float = 0.5, off_thresh: float = 0.35,
+                 min_start_ms: int = 180):
         self.silence_ms = int(silence_ms)
         self.on_thresh = float(on_thresh)
         self.off_thresh = float(off_thresh)
+        # Speech must build up to this much (within a short run) before the utterance "starts":
+        # a single 30 ms blip — the wake chime, a clap's echo, a click — must not open a capture
+        # that then ends 0.8 s later as "not understood" while the user is only starting to talk.
+        self.min_start_ms = int(min_start_ms)
         self._vad = None
         self._acc = np.zeros(0, dtype="int16")
         self.started = False
         self.speech_ms = 0
         self.silence_run_ms = 0
+        self._build_ms = 0
         self.score = 0.0
         self._load_lock = threading.Lock()
 
@@ -60,6 +66,7 @@ class Endpointer:
         self.started = False
         self.speech_ms = 0
         self.silence_run_ms = 0
+        self._build_ms = 0
         self.score = 0.0
 
     def feed(self, frame_int16) -> bool:
@@ -75,9 +82,17 @@ class Endpointer:
             except Exception:
                 self.score = 0.0
             if self.score >= self.on_thresh:
-                self.started = True
+                if not self.started:
+                    self._build_ms += _MS_PER_WIN
+                    if self._build_ms < self.min_start_ms:
+                        continue              # not yet sustained speech
+                    self.started = True
                 self.speech_ms += _MS_PER_WIN
                 self.silence_run_ms = 0
+            elif not self.started:
+                # decay the build-up on quiet so scattered blips never add up to a "start"
+                self._build_ms = max(0, self._build_ms - (2 * _MS_PER_WIN if self.score < self.off_thresh
+                                                          else _MS_PER_WIN // 2))
             elif self.score < self.off_thresh:
                 if self.started:
                     self.silence_run_ms += _MS_PER_WIN

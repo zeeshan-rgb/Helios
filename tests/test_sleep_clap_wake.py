@@ -38,8 +38,10 @@ class _Mic:
 
 
 def _daemon(sleep_after=3, dormant=False):
-    d = SimpleNamespace(vad=_Vad(), _stop=threading.Event(), dormant=dormant,
-                        live_transcript=False, _mic_level=0.0, _vu_state=None)
+    import queue
+    d = SimpleNamespace(vad=_Vad(), _stop=threading.Event(), dormant=dormant, muted=False,
+                        live_transcript=False, _mic_level=0.0, _vu_state=None,
+                        _announce_q=queue.Queue())
     d.mic = _Mic(d, sleep_after)
     return d
 
@@ -119,12 +121,75 @@ def test_sleep_leaves_a_running_listener_alone(app_env):
     assert calls["launched"] == 0
 
 
-def test_mic_button_is_idempotent(app_env):
+@pytest.fixture
+def voice_store(monkeypatch):
+    from helios import conf
+    store = {"enabled": True, "muted": False}
+
+    def update(ch):
+        for k, v in ch.items():
+            store[k.split(".", 1)[1]] = v
+    monkeypatch.setattr(conf, "update_settings", update)
+    monkeypatch.setattr(conf, "voice_cfg", lambda: dict(store))
+    return store
+
+
+def test_mic_off_mutes_instead_of_killing(app_env, voice_store):
     app, calls, alive, hub = app_env
     toggle = app._make_voice_toggle(hub)
     alive["v"] = True
-    assert toggle(True) is True and calls["killed"] == 0      # stale "off" button asking for on
-    assert toggle(False) is False and calls["killed"] == 1
-    assert toggle(False) is False and calls["killed"] == 1    # already off: nothing to do
-    assert toggle(True) is True and calls["launched"] == 1
-    assert toggle() is False                                  # no intent given: flip
+    assert toggle(False) is False
+    assert calls["killed"] == 0 and voice_store["muted"] is True        # listener stays up
+    assert ("control", {"action": "mute"}) in calls["published"]
+    assert ("voice", {"state": "off"}) in calls["published"]
+    assert toggle(True) is True and voice_store["muted"] is False
+    assert ("control", {"action": "unmute"}) in calls["published"]
+    assert calls["launched"] == 0                                       # no heavy restart
+    assert toggle() is False                                            # no intent: flip (off)
+
+
+def test_mic_off_with_no_listener_starts_it_muted(app_env, voice_store):
+    app, calls, alive, hub = app_env
+    toggle = app._make_voice_toggle(hub)
+    assert toggle(False) is False
+    assert calls["launched"] == 1 and voice_store["muted"] is True      # so a clap can wake it
+
+
+def test_muted_daemon_wakes_and_unmutes_on_clap():
+    from helios.voice.daemon import VoiceDaemon
+    events = []
+
+    class Clap:
+        def reset(self, grace=0.0):
+            events.append("reset")
+    d = SimpleNamespace(dormant=False, muted=True, clap=Clap(),
+                        bridge=SimpleNamespace(set_voice=lambda on: events.append(("set_voice", on)),
+                                               summon=lambda: events.append("summon")))
+    VoiceDaemon._wake_up(d, "double-clap")
+    assert d.muted is False and d.dormant is False
+    assert ("set_voice", True) in events and "summon" in events
+
+
+def test_mute_control_events():
+    from helios.voice.daemon import VoiceDaemon
+    states = []
+    d = SimpleNamespace(dormant=False, muted=False, clap=SimpleNamespace(reset=lambda grace=0.0: None),
+                        tts=SimpleNamespace(stop=lambda: None), _turn_complete=threading.Event())
+    d._set_state = lambda s, **k: states.append(s)
+    VoiceDaemon._on_event(d, "control", {"action": "mute"})
+    assert d.muted is True and states[-1] == "off"
+    VoiceDaemon._on_event(d, "control", {"action": "unmute"})
+    assert d.muted is False and states[-1] == "idle"
+
+
+def test_orb_hides_on_sleep_and_is_reused_on_wake(app_env, monkeypatch):
+    app, calls, alive, _ = app_env
+    killed, launched = [], []
+    monkeypatch.setattr(app, "_kill_orb", lambda: killed.append(1))
+    monkeypatch.setattr(app, "_launch_orb", lambda: launched.append(1))
+    monkeypatch.setattr(app, "_orb_alive", lambda: True)
+    monkeypatch.setattr(app, "_open_app", lambda name: None)
+    app._sleep()
+    assert killed == [] and ("control", {"action": "sleep"}) in calls["published"]
+    app._activate()
+    assert launched == [] and ("control", {"action": "wake"}) in calls["published"]

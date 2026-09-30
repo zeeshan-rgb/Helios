@@ -599,6 +599,82 @@ def night_report(night: str = "") -> str:
 
 
 @mcp.tool()
+def list_jobs() -> str:
+    """Helios's scheduled background jobs ("what's scheduled?", "is Night Mode on?", "when does
+    X run next?"): each with schedule, on/off, next run, last result and failures."""
+    from helios import jobs
+    return jobs.format_jobs()
+
+
+@mcp.tool()
+def job_history(job: str = "", limit: int = 15) -> str:
+    """Recent job runs (all jobs, or one by name/id): when, outcome, trigger and summary."""
+    from helios import jobs
+    return jobs.format_history(jobs.history(job or None, max(1, min(int(limit), 50))))
+
+
+@mcp.tool()
+def create_job(job_type: str, schedule: str, project: str = "", topics: str = "",
+               days: int = 0, name: str = "") -> str:
+    """Schedule a Helios job when the user asks ("check Maqsusi's health every weekday at 9",
+    "research MCP every Monday"). job_type: project_health | research | learn |
+    morning_briefing | night_mode. schedule: 'daily HH:MM', 'weekdays HH:MM', 'weekly mon HH:MM',
+    'hourly', 'every 30m', 'every 2h', or 'once YYYY-MM-DDTHH:MM' for a one-off. Jobs only run
+    these fixed Helios actions — never arbitrary commands."""
+    from helios import jobs
+    try:
+        j = jobs.add(job_type, schedule, name=name or None, source="chat", args={
+            "project": project or None, "days": days or None,
+            "topics": [t.strip() for t in topics.split(",") if t.strip()] or None})
+    except jobs.JobError as e:
+        return f"Not scheduled: {e}."
+    return f"Scheduled #{j['id']} {j['name']} ({j['schedule']}) — next run {jobs._when(j['next_run'])}."
+
+
+@mcp.tool()
+def set_job_enabled(job: str, enabled: bool) -> str:
+    """Turn a scheduled job on or off by name or id (system jobs night_mode / morning_briefing
+    switch their own setting)."""
+    from helios import jobs
+    try:
+        j = jobs.set_enabled(job, enabled)
+    except jobs.JobError as e:
+        return str(e)
+    return f"{j['name']} is now {'on' if j['enabled'] else 'off'} (next: {jobs._when(j['next_run'])})."
+
+
+@mcp.tool()
+def run_job_now(job: str) -> str:
+    """Run a scheduled job right now (by name or id). Can take minutes; say so first."""
+    from helios import jobs
+    try:
+        r = jobs.run_now(job)
+    except jobs.JobError as e:
+        return str(e)
+    return f"{r['job']}: {r['status']} — {r['summary']}"
+
+
+@mcp.tool()
+def delete_job(job: str) -> str:
+    """Delete a scheduled job (by name or id). System jobs can only be turned off."""
+    from helios import jobs
+    try:
+        return f"Deleted {jobs.remove(job)['name']}."
+    except jobs.JobError as e:
+        return str(e)
+
+
+@mcp.tool()
+def morning_briefing(spoken: bool = False) -> str:
+    """Today's morning briefing ("good morning", "what happened overnight?", "brief me"): last
+    night's Night Mode results per project, what was learned, research, what needs approval.
+    spoken=True returns the short version to read aloud (use it when talking by voice). Report it
+    as written — never upgrade an observation or a skipped step into a success."""
+    from helios import briefing
+    return briefing.latest_text(spoken_version=spoken)
+
+
+@mcp.tool()
 def research_findings(topic: str = "", query: str = "", days: float = 14, details: bool = False) -> str:
     """What Helios's research found ("any news on MCP?", "what did you research last night?"):
     sourced findings from the research library, newest first, optionally one topic / keywords /
@@ -971,6 +1047,21 @@ def _load_custom_tools() -> None:
                 conf.log("helios_mcp", f"custom tool '{nm}' in {f.name} failed to register: {e}")
 
 
+INTERNAL_ENV = "HELIOS_MCP_ROLE"    # set to "internal" in config/mcp.json (Helios's own launch)
+
+
+def _launched_by_helios() -> bool:
+    return os.environ.get(INTERNAL_ENV) == "internal"
+
+
 if __name__ == "__main__":
+    if not _launched_by_helios():
+        # This server has no permission gate of its own — Helios's brain hook is the gate. An
+        # outside MCP client (Antigravity IDE, Claude Desktop, ...) must use the curated,
+        # policy-enforced mcp/helios_public_server.py instead (docs/HELIOS_MCP.md).
+        sys.stderr.write("helios_server.py is Helios's INTERNAL tool server and only runs when "
+                         "Helios launches it. For other MCP clients use "
+                         "mcp/helios_public_server.py (see docs/HELIOS_MCP.md).\n")
+        sys.exit(2)
     _load_custom_tools()
     mcp.run()

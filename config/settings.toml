@@ -199,6 +199,7 @@ barge_threshold = 0.6      # stricter wake bar WHILE speaking (the open mic hear
 dictation_hotkey = "<ctrl>+<alt>+d"   # push-to-talk: transcribe speech into the focused field
 talk_hotkey = "<ctrl>+<alt>+h"        # talk to Helios: same as saying "hey Helios" (chime, then speak)
 listen_sec = 8             # after a wake word / clap / talk key: seconds to wait for you to start
+muted = false
 
 [server]
 host = "127.0.0.1"
@@ -258,3 +259,19 @@ max_topics_per_run = 5
 max_findings_per_topic = 4
 recency_days = 14
 timeout = 480   # seconds per topic (a topic usually takes 2-4 min)
+
+[briefing]
+# Morning briefing, built from last night's Night Mode report: project health, what I learned,
+# research, what needs your approval — completed / observed / suggested / failed kept apart.
+enabled = true
+time = "08:00"         # prepared once a day at/after this time -> <vault>\Briefings\<date>.md
+notify = true          # toast + dashboard note when it's ready
+speak_on_wake = true   # read the short version aloud the first time you wake Helios after that
+
+[mcp_public]
+# Helios's PUBLIC MCP server (mcp/helios_public_server.py) for other MCP clients, e.g. the
+# Antigravity IDE. Curated tools only; every call goes through Helios's permission gate
+# (Approve/Deny prompt when needed) and is logged to logs\mcp_public.log. See docs\HELIOS_MCP.md.
+enabled = true
+read_only = false      # true = only the read tools (no save_memory / create_reminder / open_app / run_project_tests)
+disabled_tools = []    # e.g. ["open_app", "run_project_tests"]

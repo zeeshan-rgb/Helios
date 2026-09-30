@@ -59,6 +59,7 @@ _HELIOS_ASK = {
     "set_screen_awareness",                                 # privacy/capability toggle
     "run_in_background", "start_mission", "spawn_agent",    # spawn autonomous agents/teams
     "approve_lesson",       # a learned rule/skill takes effect only with the user's say-so
+    "delete_job",           # destructive (removes a schedule + its history)
 }
 # Verb tokens used to classify connected-app (Composio) actions. Matched against the tool id
 # split into tokens (underscore + camelCase) so APP_SEND_X and APPSENDX both gate correctly.

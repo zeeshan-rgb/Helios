@@ -440,6 +440,7 @@ class Orb:
         self._err_until = 0.0
         self.hidden = False
         self.hidden_dash = False    # dashboard is open — set by _events(), applied in _tick()
+        self.asleep = False         # Helios is asleep — hide (the process stays up, no relaunch)
         self._drag = None
         self._frame_no = 0
         self._last_tick = time.monotonic()
@@ -534,7 +535,7 @@ class Orb:
         # housekeeping every ~0.6s: yield to fullscreen apps, re-assert topmost
         if self._frame_no % 18 == 0:
             fs = _fullscreen_on_monitor(self.hwnd)
-            want_hidden = fs or self.hidden_dash
+            want_hidden = fs or self.hidden_dash or self.asleep
             if want_hidden and not self.hidden:
                 _u.ShowWindow(self.hwnd, SW_HIDE)
                 self.hidden = True
@@ -674,6 +675,10 @@ class Orb:
                                 self.hidden_dash = True
                             elif action == "dashboard_hidden":
                                 self.hidden_dash = False
+                            elif action == "sleep":
+                                self.asleep = True
+                            elif action == "wake":
+                                self.asleep = False
             except Exception:
                 # Stream dropped — we no longer know the real turn state, reset to idle
                 # (otherwise the orb pulses 'thinking' forever after a drop).

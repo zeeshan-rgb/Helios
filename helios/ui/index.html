@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=0.9.2" />
+  <link rel="stylesheet" href="/static/style.css?v=0.11.0" />
 </head>
 <body>
   <!-- Holographic open-animation overlay (cyan scan line + edge glow + CRT grid). Inert
@@ -84,19 +84,19 @@
   </header>
 
   <main id="chat">
-    <!-- Empty state (shown when there are no messages): a LIVING neural emblem (canvas — the
-         orb's sibling, drawn by app.js, reactive to brain/voice state) + greeting + examples.
-         Hidden as soon as a message appears; restored on "New conversation". -->
+    <!-- Empty state (shown when there are no messages): Helios's BRAIN — the same living neural
+         sphere as the desktop orb (canvas, drawn by app.js, reactive to brain/voice state) — plus
+         the greeting and how to talk to it. Hidden as soon as a message appears; restored on
+         "New conversation". -->
     <div id="empty" class="empty">
-      <canvas id="emblem" class="emblem" width="256" height="256" aria-hidden="true"></canvas>
-      <div class="greet" id="greet">How can I help, sir?</div>
-      <div class="greetsub">Type below, or say <b>“Hey&nbsp;Helios”</b></div>
-      <div class="examples">
-        <button class="ex">What can you do?</button>
-        <button class="ex">Open Spotify</button>
-        <button class="ex">What's my battery and disk space?</button>
-        <button class="ex">Remind me to stretch in 30 minutes</button>
+      <div class="brainstage" aria-hidden="true">
+        <div class="brainhalo"></div>
+        <div class="brainring r1"></div>
+        <div class="brainring r2"></div>
+        <canvas id="emblem" class="brain" width="440" height="440"></canvas>
       </div>
+      <div class="greet" id="greet">How can I help, sir?</div>
+      <div class="greetsub" id="greetsub">Double-clap or press <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>H</kbd> to talk — or type below</div>
     </div>
   </main>
 
@@ -269,7 +269,7 @@
   {"imports": {"three": "/static/vendor/three170/three.module.min.js",
                "three/addons/": "/static/vendor/three170/addons/"}}
   </script>
-  <script src="/static/app.js?v=0.10.2"></script>
+  <script src="/static/app.js?v=0.11.0"></script>
   <script type="module" src="/static/viewer.js?v=0.10.0"></script>
 </body>
 </html>

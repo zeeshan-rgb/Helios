@@ -447,7 +447,11 @@ def night_task(ctx: dict):
     if reports and all(r["error"] for r in reports):
         res.status = "failed"
     res.summary = f"{len(reports)} topic(s): {new} new finding(s), {dup} already known"
-    res.data = {"new": new, "duplicates": dup, "topics": [r["topic"] for r in reports]}
+    top = sorted((f for r in reports for f in r["new"]),
+                 key=lambda f: (f["source_check"] != "ok", -f["confidence"]))
+    res.data = {"new": new, "duplicates": dup, "topics": [r["topic"] for r in reports],
+                "top": [{k: f.get(k) for k in ("topic", "title", "source_name", "confidence",
+                                                "source_check", "id")} for f in top[:5]]}
     return res
 
 

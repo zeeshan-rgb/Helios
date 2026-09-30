@@ -15,6 +15,8 @@ def run(ctx: dict) -> Result:
         res.summary = "no rules or skills waiting"
         return res
     waiting.sort(key=lambda i: (-int(i.get("seen", 1)), i.get("updated", "")))
+    res.data["pending"] = [{"id": i["id"], "category": i["category"], "text": i["text"],
+                            "seen": int(i.get("seen", 1))} for i in waiting]
     for it in waiting:
         seen = int(it.get("seen", 1))
         res.approval.append(f"{it['category'][:-1]}: {it['text']}"

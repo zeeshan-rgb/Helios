@@ -26,6 +26,7 @@ import re
 import sys
 import threading
 import time
+from collections import deque
 
 import numpy as np
 
@@ -45,7 +46,7 @@ from helios.voice.wake import WakeWord, FRAME  # noqa: E402
 from helios.ambient import AmbientMonitor   # noqa: E402
 
 _PCM_SCALE = 32768.0
-_PARTIAL_INTERVAL = 0.7              # seconds between live partial transcriptions while listening
+_PARTIAL_INTERVAL = 1.4              # seconds between live partial transcriptions while listening
 _PARTIAL_MAX_SAMPLES = 10 * 16000   # cap the audio a partial transcribes (cost bound on long speech)
 _VU_INTERVAL = 0.08                 # ~12Hz live audio-level push to the orb/HUD VU meter
 
@@ -87,6 +88,8 @@ class VoiceDaemon:
         # HELIOS_VOICE_AWAKE=0 means the app is asleep right now (e.g. Sleep restarted the voice
         # listener so a double-clap can wake it): boot dormant even if [startup].hidden is off.
         self.dormant = self._boot_dormant(s.get("hidden", False), os.environ.get("HELIOS_VOICE_AWAKE"))
+        # Mic button off = muted: no command listening, but a double-clap still turns it back on.
+        self.muted = bool(c.get("muted", False))
 
         self.mic = Microphone()
         self.wake = WakeWord(c.get("wake_word", "hey_jarvis"),
@@ -114,6 +117,9 @@ class VoiceDaemon:
         self._barged = False
         self._state = "idle"
         self._perm_q: "queue.Queue[dict]" = queue.Queue()  # pending permission asks (from SSE)
+        # Things the app wants said aloud (e.g. the morning briefing), spoken by the MAIN loop at a
+        # safe point: (monotonic time queued, text).
+        self._announce_q: "queue.Queue[tuple[float, str]]" = queue.Queue()
 
         self.tts.on_speaking(self._on_speaking)
 
@@ -186,6 +192,12 @@ class VoiceDaemon:
             if isinstance(data, dict) and data.get("id"):
                 self._perm_q.put({"id": data["id"],
                                   "summary": data.get("summary") or data.get("tool") or "an action"})
+        elif kind == "announce":
+            # The app wants something said aloud (the morning briefing). Queue it for the MAIN
+            # loop — never speak from this SSE thread while the mic may be capturing.
+            text = data.get("text") if isinstance(data, dict) else None
+            if isinstance(text, str) and text.strip():
+                self._announce_q.put((time.monotonic(), text.strip()[:2000]))
         elif kind == "control":
             # The app broadcasts wake/sleep so a tray/hotkey/power-menu action keeps the daemon's
             # dormancy in sync with the orb + dashboard (the clap path sets dormancy directly).
@@ -201,6 +213,19 @@ class VoiceDaemon:
                 self.tts.stop()
                 self._turn_complete.set()  # unblock any wait so the loop returns to dormant
                 conf.log("voice", "went dormant (control)")
+            elif action == "mute" and not self.muted:
+                # Dashboard mic button off: stop listening for commands; claps still work.
+                self.muted = True
+                self.clap.reset(grace=1.0)
+                self.tts.stop()
+                self._turn_complete.set()
+                self._set_state("off")
+                conf.log("voice", "muted — a double-clap turns the mic back on")
+            elif action == "unmute" and self.muted:
+                self.muted = False
+                self.clap.reset()
+                self._set_state("idle")
+                conf.log("voice", "unmuted")
 
     # ------------------------------------------------------------------ capture
     def _capture(self, start_timeout: float, max_sec: float, state: str = "listening"):
@@ -215,15 +240,21 @@ class VoiceDaemon:
         frames: list[np.ndarray] = []
         t0 = time.monotonic()
         last_partial = 0.0
-        asleep_at_start = self.dormant
+        speech_t0 = t0
+        # ~1.2 s of audio from before speech "starts" (the VAD needs sustained speech to start,
+        # so the first words would otherwise be cut — a live test heard only "today.")
+        preroll: "deque[np.ndarray]" = deque(maxlen=15)
+        asleep_at_start = self.dormant or self.muted
         self._vu_state = state   # VU loop now pulses the orb/HUD from the live mic level
         try:
             while not self._stop.is_set():
-                if self.dormant and not asleep_at_start:
+                if (self.dormant or self.muted) and not asleep_at_start:
                     # Put to sleep mid-listen: abandon this capture at once so the loop goes
                     # back to listening for the double-clap (it used to keep recording and
                     # miss every clap until the capture timed out).
                     return None
+                if not self._announce_q.empty() and not self.vad.started and not asleep_at_start:
+                    return None              # something to announce and nobody talking yet
                 frame = self.mic.read(0.3)
                 now = time.monotonic()
                 if frame is None:
@@ -236,12 +267,23 @@ class VoiceDaemon:
                 # live mic level (RMS, 0..1) for the VU meter
                 fa = frame.astype("float32") / _PCM_SCALE
                 self._mic_level = float(np.sqrt(np.mean(fa * fa)))
+                was_started = self.vad.started
                 ended = self.vad.feed(frame)
                 if self.vad.started:
+                    if not was_started:
+                        # speech has to build up before the VAD "starts" — keep the pre-roll so
+                        # the first syllable isn't cut off
+                        frames.extend(preroll)
+                        speech_t0 = now
                     frames.append(frame)
-                    if self.live_transcript and now - last_partial >= _PARTIAL_INTERVAL:
+                    # live partials only once there's something worth showing, and not too often:
+                    # on this CPU each one competes with the final transcription
+                    if self.live_transcript and now - speech_t0 >= 1.0 \
+                            and now - last_partial >= _PARTIAL_INTERVAL:
                         last_partial = now
                         self._spawn_partial(frames[:], state)   # snapshot; transcribe off-thread
+                else:
+                    preroll.append(frame)
                 if not self.vad.started and now - t0 > start_timeout:
                     return None
                 if ended or now - t0 > max_sec:
@@ -607,15 +649,56 @@ class VoiceDaemon:
         start listening). Once the model exists, a clap only summons the dashboard again."""
         return self.clap_enabled and not self.wake.available
 
+    _ANNOUNCE_MAX_AGE = 600.0   # seconds: an announcement left waiting longer is dropped, not replayed
+
+    def _speak_announcements(self) -> bool:
+        """Say every queued announcement (fresh ones only). True if anything was spoken."""
+        spoke = False
+        while not self._announce_q.empty():
+            try:
+                queued, text = self._announce_q.get_nowait()
+            except queue.Empty:
+                break
+            if time.monotonic() - queued > self._ANNOUNCE_MAX_AGE:
+                conf.log("voice", "dropped a stale announcement")
+                continue
+            conf.log("voice", f"announcing ({len(text)} chars)")
+            self._set_state("speaking")
+            self.tts.speak(text)
+            self._wait_speaking_done(timeout=180.0)
+            spoke = True
+        if spoke:
+            self._set_state("idle")
+        return spoke
+
     # ------------------------------------------------------------------ main loop
+    def _wake_up(self, why: str) -> None:
+        """Leave sleep and/or mute: the app reveals Helios (orb + dashboard), and a muted mic is
+        switched back on (the app persists it, so the dashboard's mic button lights up)."""
+        was_muted = self.muted
+        self.dormant = False
+        self.muted = False
+        self.clap.reset()
+        if was_muted:
+            self.bridge.set_voice(True)
+        self.bridge.summon()          # app un-dormants: orb + dashboard + open_on_wake apps
+        conf.log("voice", f"awake ({why})" + (" — mic back on" if was_muted else ""))
+
     def _main_loop(self):
         in_followup = False   # True = skip the wake word (hot mic right after Helios spoke)
         barge_capture = False  # True = this hot-mic pass follows a barge-in (full timeout, no gate)
+        relisten_ok = False    # one silent re-listen after a garbled capture (per wake)
         while not self._stop.is_set():
             # A risky tool is waiting for approval — speak it + capture the yes/no (works in any
             # state, including dormant, since a background agent can trigger it while Helios sleeps).
             if not self._perm_q.empty():
                 self._drain_permissions()
+                continue
+
+            if not self._announce_q.empty() and not self.dormant:
+                if self._speak_announcements():
+                    in_followup = True        # hot mic afterwards, so "thanks" / a question works
+                    barge_capture = False
                 continue
 
             if self._dictation_req.is_set() and not self.dormant:
@@ -625,48 +708,48 @@ class VoiceDaemon:
                 continue
 
             if self._talk_req.is_set():
-                # Talk hotkey = "hey Helios": wake if asleep, cut off any speech, and listen now.
+                # Talk hotkey = "hey Helios": wake if asleep, unmute, cut off any speech, listen now.
                 self._talk_req.clear()
                 conf.log("voice", "talk hotkey -> listening")
-                if self.dormant:
-                    self.dormant = False
-                    self.bridge.summon()
+                if self.dormant or self.muted:
+                    self._wake_up("talk hotkey")
                 self.tts.stop()
                 self.clap.reset()
-                earcons.wake()
+                earcons.wake(block=True)
                 in_followup = True
                 barge_capture = True
+                relisten_ok = True
 
-            if self.dormant:
-                # Hidden/dormant: the mic listens for the wake GESTURE (double-clap) OR the wake
-                # WORD ("hey Helios") — either wakes Helios (app reveals the orb + dashboard + apps).
-                # A hot-mic follow-up from before the sleep must not fire after a later wake.
+            if self.dormant or self.muted:
+                # Asleep, or the mic button is off ("muted"): the mic only listens for the wake
+                # GESTURE (double-clap) — plus the wake WORD while asleep but not muted. A clap
+                # wakes Helios, turns the mic back on, opens it and starts listening.
+                # A hot-mic follow-up from before must not fire after a later wake.
                 in_followup = barge_capture = False
                 frame = self.mic.read(0.3)
                 if frame is None or self._speaking.is_set():
                     continue
                 if self.clap_enabled and self.clap.feed(frame):
-                    conf.log("voice", "double-clap -> waking Helios")
-                    self.dormant = False
-                    self.clap.reset()
-                    self.bridge.summon()      # app un-dormants: orb + dashboard + open_on_wake apps
+                    conf.log("voice", "double-clap -> " + ("unmuting + " if self.muted else "")
+                             + "waking Helios")
+                    self._wake_up("double-clap")
                     if self._clap_is_wake():
-                        earcons.wake()        # no wake word yet: the clap IS the "hey Helios"
+                        earcons.wake(block=True)   # no wake word yet: the clap IS "hey Helios"
                         in_followup = True
                         barge_capture = True
+                        relisten_ok = True
                     else:
                         self._set_state("idle")
-                elif len(frame) >= FRAME and self.wake.detect(frame):
+                elif not self.muted and len(frame) >= FRAME and self.wake.detect(frame):
                     # Wake word from sleep: un-dormant AND go straight to capturing the command,
                     # since the user just addressed Helios (no need to say "hey Helios" twice).
                     conf.log("voice", f"wake word -> waking Helios (score {self.wake.score:.2f})")
-                    self.dormant = False
                     self.wake.reset()
-                    self.clap.reset()
-                    self.bridge.summon()
-                    earcons.wake()
+                    self._wake_up("wake word")
+                    earcons.wake(block=True)
                     in_followup = True        # hot mic next iteration...
                     barge_capture = True      # ...full window, skip the ambient-intent gate
+                    relisten_ok = True
                 continue
 
             if not in_followup:
@@ -680,7 +763,8 @@ class VoiceDaemon:
                     if self._clap_is_wake():
                         conf.log("voice", "double-clap -> listening (no wake-word model)")
                         self.clap.reset()
-                        earcons.wake()
+                        earcons.wake(block=True)
+                        relisten_ok = True
                     else:
                         conf.log("voice", "double-clap -> summon dashboard")
                         self.bridge.summon()
@@ -689,7 +773,8 @@ class VoiceDaemon:
                     conf.log("voice", f"wake (score {self.wake.score:.2f})")
                     self.wake.reset()
                     self.clap.reset()         # clear any pending clap onset before we capture
-                    earcons.wake()            # "I'm listening" chime
+                    earcons.wake(block=True)  # "I'm listening" chime (finished before we record)
+                    relisten_ok = True
                 else:
                     continue
 
@@ -703,9 +788,9 @@ class VoiceDaemon:
             audio = self._capture(start_timeout=start_timeout, max_sec=self.max_utterance)
             was_followup, in_followup = in_followup, False
             this_barge, barge_capture = barge_capture, False
-            if self.dormant:
-                # Slept during the capture: drop whatever was heard and wait for the clap again.
-                conf.log("voice", "listen cancelled — Helios was put to sleep")
+            if self.dormant or self.muted:
+                # Slept / muted during the capture: drop it and wait for the clap again.
+                conf.log("voice", "listen cancelled — Helios was put to sleep / muted")
                 continue
             if audio is None:
                 if explicit:
@@ -720,6 +805,13 @@ class VoiceDaemon:
                 text = self.stt.transcribe(audio)
             if not text:
                 conf.log("voice", f"speech captured ({len(audio) / 16000:.1f}s) but not understood")
+                if explicit and relisten_ok:
+                    # Probably a noise opened the capture, or the start was garbled: keep
+                    # listening once more (no chime) instead of dropping the user mid-sentence.
+                    relisten_ok = False
+                    in_followup = barge_capture = True
+                    conf.log("voice", "didn't catch that — still listening")
+                    continue
                 if not was_followup:
                     earcons.miss()             # heard speech but couldn't make it out
                 self._set_state("idle")
@@ -794,6 +886,11 @@ class VoiceDaemon:
     # ------------------------------------------------------------------ run
     def run(self):
         self._write_pid()
+        try:   # stay responsive on a busy laptop: claps and commands beat background work
+            import psutil
+            psutil.Process().nice(psutil.ABOVE_NORMAL_PRIORITY_CLASS)
+        except Exception as e:  # pragma: no cover
+            conf.log("voice", f"could not raise priority: {e}")
         if not self.mic.start():
             self._set_state("disabled")
             conf.log("voice", "no microphone — voice daemon idle (engines not loaded)")
@@ -814,6 +911,9 @@ class VoiceDaemon:
         self.ambient.start()
         if self.dormant:
             conf.log("voice", "voice daemon started (dormant — listening for the wake gesture)")
+        elif self.muted:
+            self.bridge.post_voice_state("off")
+            conf.log("voice", "voice daemon started muted (a double-clap turns the mic on)")
         else:
             self.bridge.post_voice_state("idle")  # tell the UI voice is live (mic button lights up)
             conf.log("voice", "voice daemon started")

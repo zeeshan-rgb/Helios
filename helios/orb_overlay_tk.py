@@ -201,6 +201,7 @@ class Orb:
         self.hwnd = 0
         self.hidden = False
         self.hidden_dash = False    # dashboard is open — set by _events(), applied in _watch_window()
+        self.asleep = False         # Helios is asleep — hide (the process stays up, no relaunch)
         self._drag = None
 
         # Record our PID (+ creation time) so a freshly-launched app can kill an orphaned orb
@@ -357,6 +358,10 @@ class Orb:
                                 self.hidden_dash = True
                             elif action == "dashboard_hidden":
                                 self.hidden_dash = False
+                            elif action == "sleep":
+                                self.asleep = True
+                            elif action == "wake":
+                                self.asleep = False
             except Exception:
                 # Stream dropped. We no longer know the real turn state, so reset to idle —
                 # otherwise the orb stays stuck pulsing 'thinking'/'acting' forever after a drop.
@@ -392,7 +397,7 @@ class Orb:
             if not self.hwnd:
                 self.hwnd = _u.GetAncestor(self.root.winfo_id(), GA_ROOT) or self.root.winfo_id()
             fs = _fullscreen_on_primary(self.hwnd)
-            want_hidden = fs or self.hidden_dash
+            want_hidden = fs or self.hidden_dash or self.asleep
             if want_hidden and not self.hidden:
                 self.root.withdraw()
                 self.hidden = True

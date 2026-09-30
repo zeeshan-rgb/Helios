@@ -13,12 +13,14 @@ def run(ctx: dict) -> Result:
     if not use_llm:
         res.observed.append("offline — used the no-AI fallback for lessons")
     stored = pending = 0
+    learned = res.data.setdefault("learned", [])
     for day in ctx["days"]:
         out = learning.learn_from_daily(day, use_llm=use_llm)
         if out.get("skipped") or not out["exchanges"]:
             continue
         for l in out["lessons"]:
             if l["result"] == "saved":
+                learned.append({k: l.get(k) for k in ("category", "text", "status", "id")})
                 stored += 1
                 if l["status"] == "active":
                     res.completed.append(f"learned ({l['category']}): {l['text']}")
