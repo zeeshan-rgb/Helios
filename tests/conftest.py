@@ -30,8 +30,9 @@ def _isolate_runtime_flags(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(conf, "YOLO_FLAG", d / "yolo.flag")
     monkeypatch.setattr(conf, "SCREEN_LOCK", d / "screen.lock")
     # ...and never the real helios.db (Night Mode / the briefing now record runs in job history).
-    from helios import db, jobs
+    from helios import db, jobs, usage
     monkeypatch.setattr(db, "DB_PATH", d / "helios.db")
+    monkeypatch.setattr(usage, "_file", lambda: d / "usage.jsonl")
     monkeypatch.setattr(jobs, "_first_tick", True)
 
 

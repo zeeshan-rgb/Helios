@@ -599,6 +599,43 @@ def night_report(night: str = "") -> str:
 
 
 @mcp.tool()
+def list_leads(status: str = "new", days: float = 14, service: str = "") -> str:
+    """Paid-work leads Helios found overnight ("any leads?", "show me the web dev leads"):
+    each with a suggested price range, the client's need and the source. status: new |
+    contacted | won | lost | dismissed | all. Helios never contacts leads — the user does."""
+    from helios import leads
+    items = leads.all_leads(None if status == "all" else (status or None), days=days or None,
+                            service=service or None)
+    return leads.format_leads(items[:20])
+
+
+@mcp.tool()
+def lead_details(lead_id: str) -> str:
+    """One lead in full: need, why it fits, contact route, source link and the pitch draft."""
+    from helios import leads
+    d = leads.get(lead_id)
+    return leads.format_leads([d], verbose=True) if d else "No lead with that id."
+
+
+@mcp.tool()
+def set_lead_status(lead_id: str, status: str) -> str:
+    """Record what happened with a lead: contacted | won | lost | dismissed | new."""
+    from helios import leads
+    try:
+        d = leads.set_status(lead_id, status)
+    except ValueError as e:
+        return str(e)
+    return f"{d['title']} -> {status}." if d else "No lead with that id."
+
+
+@mcp.tool()
+def ai_usage(days: int = 7) -> str:
+    """How many AI tokens Helios used per day and what for (chat, research, leads, learning)."""
+    from helios import usage
+    return usage.format_summary(max(1, min(int(days), 60)))
+
+
+@mcp.tool()
 def list_jobs() -> str:
     """Helios's scheduled background jobs ("what's scheduled?", "is Night Mode on?", "when does
     X run next?"): each with schedule, on/off, next run, last result and failures."""
