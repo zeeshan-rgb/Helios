@@ -281,8 +281,9 @@ def _duplicate_of(f: dict, existing: list[dict]) -> dict | None:
     return None
 
 
-def store(topic: str, project: str, raw_findings: list, *, verify=check_source) -> dict:
+def store(topic: str, project: str, raw_findings: list, *, verify=None) -> dict:
     """Validate, verify sources, de-duplicate and save. Returns counts + the saved findings."""
+    verify = verify or check_source      # looked up at call time (patchable; no early binding)
     now = datetime.now().isoformat(timespec="seconds")
     existing = findings(topic, limit=100000)
     out = {"new": [], "duplicates": [], "dropped": []}
@@ -396,7 +397,7 @@ def _call_agent(topic: str, project: str) -> tuple[list, str]:
     return data["findings"], ""
 
 
-def research_topic(topic: str, project: str = "", *, call=None, verify=check_source) -> dict:
+def research_topic(topic: str, project: str = "", *, call=None, verify=None) -> dict:
     t0 = datetime.now()
     raw, err = (call or _call_agent)(topic, project)
     rep = {"topic": topic, "project": project, "error": err, "new": [], "duplicates": [],
@@ -412,7 +413,7 @@ def research_topic(topic: str, project: str = "", *, call=None, verify=check_sou
     return rep
 
 
-def run(topic_names: list[str] | None = None, *, call=None, verify=check_source) -> list[dict]:
+def run(topic_names: list[str] | None = None, *, call=None, verify=None) -> list[dict]:
     """Research the given topics (or the next ones in rotation). Returns per-topic reports."""
     if topic_names:
         known = {t["topic"].lower(): t for t in topics()}

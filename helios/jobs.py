@@ -60,6 +60,16 @@ def _run_research(args: dict) -> tuple[str, str]:
     return "ok", f"{len(reps)} topic(s), {new} new finding(s)"
 
 
+def _run_leads(args: dict) -> tuple[str, str]:
+    from . import leads
+    if not leads.enabled():
+        return "skipped", "the lead finder is off ([leads] enabled = false)"
+    reps = leads.run(args.get("services") or None)
+    if reps and all(r["error"] for r in reps):
+        return "failed", "; ".join(f"{r['service']}: {r['error']}" for r in reps)[:500]
+    return "ok", f"{len(reps)} service(s), {sum(len(r['new']) for r in reps)} new lead(s)"
+
+
 def _run_learn(args: dict) -> tuple[str, str]:
     from . import learning
     from .night_mode.common import online
@@ -86,6 +96,7 @@ def _run_night_mode(args: dict) -> tuple[str, str]:
 TYPES = {
     "project_health": ("Project health checks", _run_project_health, True),
     "research": ("Research", _run_research, True),
+    "leads": ("Lead finder", _run_leads, True),
     "learn": ("Learn from conversations", _run_learn, False),
     "morning_briefing": ("Morning briefing", _run_briefing, False),
     "night_mode": ("Night Mode", _run_night_mode, True),

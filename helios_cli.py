@@ -578,6 +578,50 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_leads(args) -> int:
+    """Lead finder: `helios leads [list [status] | show <id> | contacted <id> | won <id> |
+    lost <id> | dismiss <id> | run [service ...] | rates]`. status: new (default), contacted,
+    won, lost, dismissed, all. Helios never contacts leads — it drafts the pitch, you send it."""
+    _conf()
+    from helios import leads
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "list"
+    if action == "list":
+        st = args[0].lower() if args else "new"
+        print(leads.format_leads(leads.all_leads(None if st == "all" else st)))
+    elif action == "show" and args:
+        d = leads.get(args[0])
+        print(leads.format_leads([d], verbose=True) if d else "No lead with that id.")
+    elif action in ("contacted", "won", "lost", "dismiss") and args:
+        d = leads.set_status(args[0], "dismissed" if action == "dismiss" else action)
+        print(f"{d['title']} -> {d['status']}" if d else "No lead with that id.")
+    elif action == "run":
+        names = [a for a in args if a in leads.SERVICES] or None
+        print("Searching (a few minutes per service)...")
+        for r in leads.run(names):
+            print(f"{r['service']}: " + (f"FAILED — {r['error']}" if r["error"] else
+                  f"{len(r['new'])} new, {len(r['duplicates'])} known, {len(r['dropped'])} dropped ({r['seconds']}s)"))
+            for d in r["new"]:
+                print("  + " + leads.format_leads([d]))
+    elif action == "rates":
+        for s in leads.services():
+            r = leads.rates(s)
+            print(f"{s:18} " + "  ".join(f"{t}: {leads.currency()} {lo:,}-{hi:,}" for t, (lo, hi) in r.items()))
+    else:
+        print(cmd_leads.__doc__.split(":", 1)[1].strip())
+        return 2
+    return 0
+
+
+def cmd_usage(args) -> int:
+    """AI token usage: `helios usage [days]` (default 7)."""
+    _conf()
+    from helios import usage
+    days = int(args[0]) if args and str(args[0]).isdigit() else 7
+    print(usage.format_summary(days))
+    return 0
+
+
 def cmd_security(args) -> int:
     """Security self-check: `helios security` — is every protection in place? Read-only."""
     _conf()
@@ -708,6 +752,8 @@ _COMMANDS = {
     "mcp": cmd_mcp,
     "jobs": cmd_jobs,
     "security": cmd_security,
+    "leads": cmd_leads,
+    "usage": cmd_usage,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -729,6 +775,8 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  mcp           public MCP server for other apps: config snippet / tools / call log\n"
           "  jobs          scheduled jobs: list / add / enable / disable / remove / run / history\n"
           "  security      security self-check: is every protection in place?\n"
+          "  leads         worldwide paid-work leads with price ranges: list / show / won / run\n"
+          "  usage         AI tokens used per day and what for\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

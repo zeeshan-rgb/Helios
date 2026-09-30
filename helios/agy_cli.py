@@ -449,6 +449,9 @@ def run_once(prompt: str, rules: str, *, model: str = "", tools: bool = True,
                 proc.wait(timeout=15)
             except Exception:
                 kill_tree(proc)
+        u = res.get("usage") or {}
+        from . import usage
+        usage.record(label, u.get("in"), u.get("out"))
         if res.get("gate_failure"):
             conf.log("antigravity", f"[{label}] gate failure ({res['gate_failure']}) — run killed")
         elif not res["text"]:

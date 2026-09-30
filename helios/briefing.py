@@ -137,6 +137,9 @@ def build(now: datetime | None = None, rec: dict | None = None) -> dict:
     research = _task(rec, "research")
     b["research"] = {"status": research.get("status", "not run"), "summary": research.get("summary", ""),
                      **{k: (research.get("data") or {}).get(k) for k in ("new", "duplicates", "top")}}
+    lt = _task(rec, "find_leads")
+    b["leads"] = {"status": lt.get("status", "not run"), "summary": lt.get("summary", ""),
+                  **{k: (lt.get("data") or {}).get(k) for k in ("new", "top")}}
 
     if rec and rec.get("tasks"):
         b["sections"] = morning_report.collect(rec)
@@ -189,6 +192,17 @@ def render(b: dict) -> str:
     else:
         out.append(f"- {r.get('status', 'not run')}: {r.get('summary') or 'research did not run tonight'}")
     out.append("")
+    ld = b.get("leads") or {}
+    if ld.get("status") not in (None, "not run"):
+        out.append("### Leads")
+        if ld.get("status") == "ok":
+            out.append(f"- New leads: {ld.get('new') or 0}")
+            out += [f"    - {t['title']} — suggest {t['currency']} {t['price_min']:,}–{t['price_max']:,}"
+                    f" ({t['service']}, {t['scope']}) · `helios leads show {t['id']}`"
+                    for t in (ld.get("top") or [])[:5]]
+        else:
+            out.append(f"- {ld.get('status')}: {ld.get('summary') or 'did not run'}")
+        out.append("")
     out += ["## Needs your approval", ""]
     if b["pending"]:
         out += [f"- {p['category'][:-1]}: {p['text']}" + (f" (said {p['seen']}x)" if p["seen"] > 1 else "")
@@ -274,6 +288,12 @@ def spoken(b: dict) -> str:
         top = (r.get("top") or [{}])[0].get("title", "")
         parts.append(f"Research turned up {r['new']} new finding{'s' if r['new'] != 1 else ''}"
                      + (f", including: {top}." if top else "."))
+    ld = b.get("leads") or {}
+    if ld.get("status") == "ok" and ld.get("new"):
+        top = (ld.get("top") or [{}])[0]
+        best = (f"; the best: {top.get('title')}, worth about {top.get('price_min', 0):,} to "
+                f"{top.get('price_max', 0):,} {top.get('currency', 'USD')}") if top.get("title") else ""
+        parts.append(f"I found {ld['new']} new lead{'s' if ld['new'] != 1 else ''}{best}.")
     failed = [f for f in b["sections"].get("failed", []) if "task failed" in f]
     if b["night_status"].startswith("completed"):
         parts.append("Nothing failed." if not failed else "The details are in the report.")

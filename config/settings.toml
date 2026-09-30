@@ -243,6 +243,7 @@ end = "05:00"     # hard end: no task starts after this
 sync_projects = "01:00"
 run_checks = "01:15"
 research = "02:00"
+find_leads = "02:40"            # worldwide paid-work leads with price ranges
 analyze_conversations = "03:00"
 extract_memories = "03:30"
 update_rules_skills = "03:45"
@@ -283,3 +284,45 @@ disabled_tools = []    # e.g. ["open_app", "run_project_tests"]
 # To allow one location on purpose, list its path (or a parent folder) here; it then goes through
 # the normal policy, which still asks you first. Keep this empty unless you really need it.
 allow_protected = []
+
+[leads]
+# Nightly, worldwide search for paid work matching your services, with a suggested price range per
+# lead (from the rate card below) and a pitch draft. Helios NEVER contacts anyone — you send it.
+# Leads live in <vault>\Leads\ and show up in the morning briefing; helios leads to manage them.
+enabled = true
+region = "worldwide"
+services = ["web_dev", "app_dev", "web_enhancement", "digital_marketing", "logo_design", "pamphlet_design", "youtube_content"]
+per_night = 3                # services searched per night (they rotate) — ~150-180k tokens each
+max_leads_per_service = 3
+currency = "USD"
+timeout = 480                # seconds per service search
+# Rate card: [min, max] per job size. small = one simple deliverable, medium = a typical project,
+# large = a big or ongoing project. Edit freely — prices are computed from these, never by the AI.
+[leads.rates.web_dev]
+small = [300, 800]
+medium = [800, 2500]
+large = [2500, 8000]
+[leads.rates.app_dev]
+small = [1500, 4000]
+medium = [4000, 12000]
+large = [12000, 30000]
+[leads.rates.web_enhancement]
+small = [150, 500]
+medium = [500, 1500]
+large = [1500, 4000]
+[leads.rates.digital_marketing]
+small = [200, 600]
+medium = [500, 1500]
+large = [1500, 4000]
+[leads.rates.logo_design]
+small = [50, 150]
+medium = [150, 400]
+large = [400, 1200]
+[leads.rates.pamphlet_design]
+small = [30, 100]
+medium = [100, 250]
+large = [250, 600]
+[leads.rates.youtube_content]
+small = [50, 200]
+medium = [200, 600]
+large = [600, 2000]

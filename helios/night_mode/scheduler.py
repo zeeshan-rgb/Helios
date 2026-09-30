@@ -31,21 +31,22 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .. import conf
-from . import (conversation_analyzer, memory_extractor, morning_report, project_scanner,
-               research_agent, skill_builder, test_runner)
+from . import (conversation_analyzer, lead_finder, memory_extractor, morning_report,
+               project_scanner, research_agent, skill_builder, test_runner)
 from .common import Result, online, safe_write
 
 TASKS = {
     "sync_projects": (project_scanner.sync_projects, "sync project state"),
     "run_checks": (test_runner.run, "project health: configured checks, dependencies, probes"),
     "research": (research_agent.run, "research configured topics"),
+    "find_leads": (lead_finder.run, "find worldwide paid-work leads (with price ranges)"),
     "analyze_conversations": (conversation_analyzer.run, "analyze recent interactions"),
     "extract_memories": (memory_extractor.run, "extract memories / lessons"),
     "update_rules_skills": (skill_builder.run, "review learned rules and skills"),
     "project_summaries": (project_scanner.project_summaries, "generate project summaries"),
 }
 DEFAULT_SCHEDULE = {
-    "sync_projects": "01:00", "run_checks": "01:15", "research": "02:00",
+    "sync_projects": "01:00", "run_checks": "01:15", "research": "02:00", "find_leads": "02:40",
     "analyze_conversations": "03:00", "extract_memories": "03:30",
     "update_rules_skills": "03:45", "project_summaries": "04:00",
 }

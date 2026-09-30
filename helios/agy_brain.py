@@ -188,6 +188,9 @@ class AntigravityBrain(Brain):
         if interactive:
             self.emit("usage", {"model": model or "agy default", "tier": route["tier"],
                                 "tools": res.get("tools", []), **(res.get("usage") or {})})
+            from . import usage
+            u = res.get("usage") or {}
+            usage.record("chat", u.get("in"), u.get("out"))
         self.emit("done", {"text": final_text})
 
         if self._aborted:
