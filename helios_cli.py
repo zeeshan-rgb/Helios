@@ -578,6 +578,17 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_security(args) -> int:
+    """Security self-check: `helios security` — is every protection in place? Read-only."""
+    _conf()
+    from helios import security
+    checks = security.self_check()
+    print("HELIOS SECURITY CHECK\n")
+    print(security.format_checks(checks))
+    print("\nDetails: docs/SECURITY.md")
+    return 1 if any(s == "fail" for _, s, _ in checks) else 0
+
+
 def cmd_jobs(args) -> int:
     """Scheduled jobs: `helios jobs [list | add <type> "<schedule>" [--project P] [--topics a,b]
     [--days N] [--name N] | enable <job> | disable <job> | remove <job> | run <job> |
@@ -696,6 +707,7 @@ _COMMANDS = {
     "briefing": cmd_briefing,
     "mcp": cmd_mcp,
     "jobs": cmd_jobs,
+    "security": cmd_security,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -716,6 +728,7 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  briefing      today's morning briefing (--spoken for the read-aloud version)\n"
           "  mcp           public MCP server for other apps: config snippet / tools / call log\n"
           "  jobs          scheduled jobs: list / add / enable / disable / remove / run / history\n"
+          "  security      security self-check: is every protection in place?\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

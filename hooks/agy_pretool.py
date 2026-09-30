@@ -204,7 +204,7 @@ def main() -> None:
     # The Claude-format policy module prints its own JSON (and may sys.exit) on load failure;
     # swallow its stdout so the only thing agy ever parses is our decision below.
     try:
-        raw = sys.stdin.buffer.read().decode("utf-8", "replace")
+        raw = sys.stdin.buffer.read().decode("utf-8", "replace").lstrip("﻿")   # tolerate a BOM
         payload = json.loads(raw) if raw.strip() else {}
         call = payload.get("toolCall") or {}
         with contextlib.redirect_stdout(io.StringIO()):

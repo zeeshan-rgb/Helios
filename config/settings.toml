@@ -275,3 +275,11 @@ speak_on_wake = true   # read the short version aloud the first time you wake He
 enabled = true
 read_only = false      # true = only the read tools (no save_memory / create_reminder / open_app / run_project_tests)
 disabled_tools = []    # e.g. ["open_app", "run_project_tests"]
+
+[security]
+# Credential stores and secrets (SSH keys, password managers, browser credential stores, API
+# credential files, cloud credentials, Helios's own secrets) are HARD-DENIED to every autonomous
+# caller — the brain, background agents, Night Mode, MCP clients — even in YOLO mode.
+# To allow one location on purpose, list its path (or a parent folder) here; it then goes through
+# the normal policy, which still asks you first. Keep this empty unless you really need it.
+allow_protected = []
