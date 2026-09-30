@@ -530,6 +530,118 @@ def cmd_night(args) -> int:
     return 0
 
 
+def cmd_mcp(args) -> int:
+    """Helios's public MCP server: `helios mcp [config | tools | log | antigravity]`. `config`
+    prints the JSON for an MCP client; `antigravity` prints the `agy mcp add` command."""
+    conf = _conf()
+    args = list(args or [])
+    action = args[0].lower() if args else "config"
+    py = VENV_PYW                   # windowless, like the internal server (no console flash)
+    server = REPO / "mcp" / "helios_public_server.py"
+    if action == "config":
+        entry = {"mcpServers": {"helios": {"command": py.as_posix(), "args": [server.as_posix()]}}}
+        print(json.dumps(entry, indent=2))
+        print("\nPaste this into your MCP client's config (Antigravity: its mcp_config.json).\n"
+              "Only the curated public tools are exposed; every call goes through Helios's "
+              "permission gate. See docs/HELIOS_MCP.md.")
+    elif action == "tools":
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("helios_public_server", server)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        c = conf._section("mcp_public")
+        print(f"Public MCP server: {'ON' if c.get('enabled', True) else 'OFF'}"
+              f"{' (read-only)' if c.get('read_only') else ''}")
+        for name, (internal, kind) in mod.TOOLS.items():
+            off = " — DISABLED" if name in (c.get("disabled_tools") or []) or \
+                (c.get("read_only") and kind != "read") else ""
+            print(f"  {name:20} {kind:6} (policy: {internal}){off}")
+    elif action == "antigravity":
+        # The supported direction only: Antigravity -> MCP -> Helios public server. Registered with
+        # Antigravity's own `agy mcp add` (its global MCP config, shared by the IDE and the CLI).
+        # Named helios-public, never "helios": that name is the internal server inside Helios's
+        # own brain sessions and must not be shadowed.
+        agy = str(conf.SETTINGS.get("antigravity", {}).get("bin") or "agy")
+        print("Register Helios's public MCP server with Antigravity (IDE + agy CLI):\n")
+        print(f'  "{agy}" mcp add helios-public "{py.as_posix()}" "{server.as_posix()}"\n')
+        print("Check:   agy mcp list        Remove:  agy mcp remove helios-public")
+        print("Or, for one workspace only, put the `helios mcp config` JSON (renamed to "
+              "helios-public) in <workspace>\\.agents\\mcp_config.json.")
+        print("Full guide: docs/ANTIGRAVITY_MCP.md")
+    elif action == "log":
+        f = conf.LOGS_DIR / "mcp_public.log"
+        print("\n".join(f.read_text(encoding="utf-8").splitlines()[-30:]) if f.exists()
+              else "No public MCP calls yet.")
+    else:
+        print(cmd_mcp.__doc__.split(":", 1)[1].strip())
+        return 2
+    return 0
+
+
+def cmd_jobs(args) -> int:
+    """Scheduled jobs: `helios jobs [list | add <type> "<schedule>" [--project P] [--topics a,b]
+    [--days N] [--name N] | enable <job> | disable <job> | remove <job> | run <job> |
+    history [job]]`. Types: project_health, research, learn, morning_briefing, night_mode.
+    Schedules: 'daily 07:30', 'weekdays 09:00', 'weekly mon 09:00', 'hourly', 'every 30m',
+    'every 2h', 'once 2026-10-02T09:00'."""
+    _conf()
+    from helios import jobs
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "list"
+
+    def opt(flag):
+        if flag in args:
+            i = args.index(flag)
+            v = args[i + 1] if i + 1 < len(args) else ""
+            del args[i:i + 2]
+            return v
+        return None
+
+    try:
+        if action == "list":
+            print(jobs.format_jobs())
+        elif action == "add" and len(args) >= 2:
+            name, project, topics, days = opt("--name"), opt("--project"), opt("--topics"), opt("--days")
+            a = {"project": project, "days": int(days) if days else None,
+                 "topics": [t.strip() for t in topics.split(",") if t.strip()] if topics else None}
+            j = jobs.add(args[0], " ".join(args[1:]), name=name, args=a)
+            print(f"Added #{j['id']} {j['name']} — next run {jobs._when(j['next_run'])}")
+        elif action in ("enable", "disable") and args:
+            j = jobs.set_enabled(" ".join(args), action == "enable")
+            print(f"{j['name']}: {'on' if j['enabled'] else 'off'} · next: {jobs._when(j['next_run'])}")
+        elif action == "remove" and args:
+            print(f"Removed {jobs.remove(' '.join(args))['name']}.")
+        elif action == "run" and args:
+            print("Running now...")
+            r = jobs.run_now(" ".join(args))
+            print(f"{r['job']}: {r['status']} — {r['summary']}")
+        elif action == "history":
+            print(jobs.format_history(jobs.history(" ".join(args) or None)))
+        else:
+            print(cmd_jobs.__doc__.split(":", 1)[1].strip())
+            return 2
+    except jobs.JobError as e:
+        print(f"Error: {e}")
+        return 1
+    return 0
+
+
+def cmd_briefing(args) -> int:
+    """Morning briefing: `helios briefing [--spoken] [--fresh] [YYYY-MM-DD]`. --spoken prints the
+    short read-aloud version; --fresh rebuilds today's from the latest results."""
+    _conf()
+    from helios import briefing
+    args = list(args or [])
+    day = next((a for a in args if re.fullmatch(r"\d{4}-\d{2}-\d{2}", a)), None)
+    if "--fresh" in args:
+        out = briefing.prepare()
+        print(out["spoken"] if "--spoken" in args else out["text"])
+        print(f"(saved: {out['path']})")
+        return 0
+    print(briefing.latest_text(day, spoken_version="--spoken" in args))
+    return 0
+
+
 def cmd_research(args) -> int:
     """Research: `helios research [topics | run [topic ...] | findings [topic] [--days N] |
     show <id> | keep <id>]`. `keep` copies one finding into memory (findings never go there
@@ -581,6 +693,9 @@ _COMMANDS = {
     "projects": cmd_projects,
     "night": cmd_night,
     "research": cmd_research,
+    "briefing": cmd_briefing,
+    "mcp": cmd_mcp,
+    "jobs": cmd_jobs,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -598,6 +713,9 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  projects      list / add / changes / check / health of your configured projects\n"
           "  night         Night Mode: status / run now / last report / on / off\n"
           "  research      research topics / run now / findings / keep one in memory\n"
+          "  briefing      today's morning briefing (--spoken for the read-aloud version)\n"
+          "  mcp           public MCP server for other apps: config snippet / tools / call log\n"
+          "  jobs          scheduled jobs: list / add / enable / disable / remove / run / history\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

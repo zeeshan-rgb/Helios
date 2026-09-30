@@ -34,6 +34,7 @@ ROWS = (("build", "Build"), ("test", "Tests"), ("lint", "Lint"), ("typecheck", "
         ("other", "Other checks"))
 UNCOMMITTED_DAYS = 3        # uncommitted work older than this becomes a potential issue
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_BELOW_NORMAL = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)   # background: never compete with voice
 
 
 # ------------------------------------------------------------------------------ helpers
@@ -45,7 +46,7 @@ def _run(argv: list[str], cwd: str, timeout: int = 180) -> tuple[int | None, str
     try:
         r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=timeout, env=env, stdin=subprocess.DEVNULL,
-                           creationflags=_NO_WINDOW)
+                           creationflags=_NO_WINDOW | _BELOW_NORMAL)
         return r.returncode, r.stdout or ""
     except Exception as e:
         conf.log("health", f"{argv[0]} failed: {e}")

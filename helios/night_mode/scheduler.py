@@ -308,9 +308,21 @@ def _panic(since: float = 0.0) -> bool:
         return False
 
 
+def _record_job(rec: dict, trigger: str) -> None:
+    """Report this run in the unified job history (helios/jobs.py) — never raises."""
+    try:
+        from .. import jobs
+        started = datetime.fromisoformat(rec["started"]) if rec.get("started") else None
+        finished = datetime.fromisoformat(rec["finished"]) if rec.get("finished") else None
+        jobs.record_system_run("night_mode", jobs._night_status(rec.get("status", "")),
+                               jobs._night_summary(rec), started, finished, trigger)
+    except Exception as e:  # pragma: no cover
+        conf.log("night", f"job history record failed: {e}")
+
+
 def run_night(now: datetime | None = None, *, scheduled: bool = False, only: list[str] | None = None,
               wait: bool = False, emit=None, stop: threading.Event | None = None,
-              sleep=time.sleep) -> dict:
+              sleep=time.sleep, record_job: bool = True) -> dict:
     """Run Night Mode. scheduled=True: tonight's window run (waits for each task's time when
     `wait`, stops at the window end, one per night). Otherwise a manual run of every scheduled
     task (or `only`) right now. Returns the run record (also saved + reported)."""
@@ -327,8 +339,11 @@ def run_night(now: datetime | None = None, *, scheduled: bool = False, only: lis
             return busy                          # another process holds it — leave its lock alone
         try:
             _running.set()
-            return _run(key, ws, we, now, scheduled=scheduled, only=only, wait=wait, emit=emit,
-                        stop=stop, sleep=sleep)
+            rec = _run(key, ws, we, now, scheduled=scheduled, only=only, wait=wait, emit=emit,
+                       stop=stop, sleep=sleep)
+            if record_job:
+                _record_job(rec, "system" if scheduled else "manual")
+            return rec
         finally:
             _running.clear()
             _release_lock()
@@ -444,6 +459,7 @@ def _recover_interrupted() -> None:
                 save_run(r)
             except Exception:
                 pass
+            _record_job(r, "system")
             conf.log("night", f"[{r['night']}] marked interrupted")
 
 
@@ -484,6 +500,7 @@ def tick(now: datetime | None = None, emit=None, stop: threading.Event | None = 
             conf.log("night", f"[{key}] missed-report failed: {e}")
         save_run(rec)
         _announce(rec, emit)
+        _record_job(rec, "system")
         return "missed"
     return "idle"
 

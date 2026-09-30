@@ -17,8 +17,8 @@ from .. import conf
 # faster-whisper exposes per-segment no_speech_prob (likelihood the audio is NOT speech) and
 # avg_logprob (decoder confidence). Reject a clip that looks like non-speech or a low-confidence
 # hallucination — Whisper otherwise happily emits "Thank you." / "you" for near-silence.
-_NO_SPEECH_MAX = 0.6
-_LOGPROB_MIN = -1.0
+_NO_SPEECH_MAX = 0.7
+_LOGPROB_MIN = -1.25   # a little looser than Whisper's -1.0 default: accented English scores lower
 # Common Whisper hallucinations on silence/noise — drop if the whole transcript is just these.
 _JUNK = {"", "you", "thank you", "thanks for watching", "thank you.", ".", "bye",
          "thanks for watching!", "okay", "so", "hmm", "uh", "um"}
@@ -70,17 +70,18 @@ class Transcriber:
             if audio.size < 1600:  # < 0.1s — nothing to hear
                 return ""
             segments = self._transcribe_core(audio)
-            parts, kept = [], False
+            parts, kept, dropped = [], False, []
             for s in segments:
-                if gated:
-                    if getattr(s, "no_speech_prob", 0.0) > _NO_SPEECH_MAX:
-                        continue
-                    if getattr(s, "avg_logprob", 0.0) < _LOGPROB_MIN:
-                        continue
+                nsp, lp = getattr(s, "no_speech_prob", 0.0), getattr(s, "avg_logprob", 0.0)
+                if gated and (nsp > _NO_SPEECH_MAX or lp < _LOGPROB_MIN):
+                    dropped.append(f"{s.text.strip()!r} (no_speech {nsp:.2f}, logprob {lp:.2f})")
+                    continue
                 parts.append(s.text)
                 kept = True
             text = re.sub(r"\s+", " ", " ".join(parts)).strip()
             if gated and (not kept or text.lower().strip(" .,!?") in _JUNK):
+                # Say what was thrown away, so "not understood" can be tuned instead of guessed at.
+                conf.log("voice", "stt rejected: " + ("; ".join(dropped) if dropped else repr(text)))
                 return ""
             return text
         except Exception as e:  # pragma: no cover

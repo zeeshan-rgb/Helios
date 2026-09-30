@@ -51,9 +51,17 @@ def _play(sig: np.ndarray) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
-def wake() -> None:
-    """Play the wake chime (just after the wake word fires)."""
+WAKE_SEC = len(_WAKE) / SR
+
+
+def wake(block: bool = False) -> None:
+    """Play the wake chime (just after the wake word fires). block=True returns only once the
+    chime (plus a short tail for the room / a clap's echo) is over, so the capture that follows
+    doesn't record it — the chime used to open captures that ended as "not understood"."""
     _play(_WAKE)
+    if block:
+        import time
+        time.sleep(WAKE_SEC + 0.18)
 
 
 def miss() -> None:

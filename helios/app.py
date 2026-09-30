@@ -13,6 +13,7 @@ import json
 import os
 import queue
 import threading
+import time
 import urllib.request
 import webbrowser
 
@@ -45,6 +46,20 @@ def _window_dispatcher() -> None:
             op()
         except Exception as e:  # pragma: no cover
             conf.log("app", f"window op error: {e}")
+
+
+STARTUP_STAGGER_S = 20   # non-urgent boot work waits this long, so the voice models load first
+
+
+def _after(seconds: float, fn):
+    """A thread target that sleeps first, then runs fn (errors logged, never raised)."""
+    def run():
+        time.sleep(seconds)
+        try:
+            fn()
+        except Exception as e:  # pragma: no cover
+            conf.log("app", f"delayed start of {getattr(fn, '__name__', fn)} failed: {e}")
+    return run
 
 
 def _dispatch(op) -> None:
@@ -226,26 +241,39 @@ def _activate() -> None:
         return
     _state["dormant"] = False
     conf.log("app", "waking from dormant")
-    _launch_orb()  # bring the ambient orb to life (it wasn't started at boot)
+    if not _orb_alive():
+        _launch_orb()  # first wake since boot: bring the orb to life (it wasn't started dormant)
     hub = _state.get("hub")
     if hub is not None:
-        hub.publish("control", {"action": "wake"})  # daemon leaves dormant (tray/hotkey paths)
+        # voice daemon leaves dormant; a sleeping orb shows itself again (no relaunch)
+        hub.publish("control", {"action": "wake"})
     for app_name in conf.startup_cfg().get("open_on_wake", []):
         _open_app(str(app_name))
+    if hub is not None:
+        try:   # first wake after the morning briefing is ready: read it aloud
+            from . import briefing
+            briefing.on_wake(hub.publish)
+        except Exception as e:  # pragma: no cover
+            conf.log("app", f"briefing on wake failed: {e}")
+
+
+_sleep_lock = threading.Lock()
 
 
 def _sleep() -> None:
     """Power-menu 'Sleep': hide the dashboard, remove the orb, and go dormant — the mic keeps
     listening for the double-clap to wake again. The opposite of _activate()."""
-    if _state.get("dormant"):
-        return
+    with _sleep_lock:                    # two quick requests must not both go through
+        if _state.get("dormant"):
+            return
+        _state["dormant"] = True
     conf.log("app", "going to sleep (dormant)")
-    _state["dormant"] = True
     _show_dashboard(False)  # hide the dashboard window
-    _kill_orb()             # remove the orb
     hub = _state.get("hub")
     if hub is not None:
-        hub.publish("control", {"action": "sleep"})  # daemon -> clap-only dormant mode
+        # daemon -> clap-only dormant mode; the orb HIDES (it used to be killed and relaunched on
+        # every sleep/wake — a full Python start each time, and a big part of the lag)
+        hub.publish("control", {"action": "sleep"})
     if not _voice_alive():
         # Sleep promises "clap twice to wake", which needs the voice listener. If the mic was
         # switched off, turn it back on (it boots dormant: clap/wake-word only) — otherwise
@@ -299,6 +327,7 @@ def _toggle_maximize_dashboard() -> bool:
         if win is None:
             return
         try:
+            import clr  # noqa: F401 — pythonnet must be imported before the .NET namespaces
             from System import Func, Type                    # pythonnet (pywebview's backend)
             from System.Drawing import Rectangle
             import System.Windows.Forms as WinForms
@@ -467,7 +496,10 @@ def main() -> None:
     perms = PendingRegistry(notifier=_perm_notifier)  # broadcasts + auto-opens dashboard when no voice
     brain = build_brain(emit=hub.publish, perms=perms)   # Claude brain or lite brain, per [brain].engine
     if hasattr(brain, "warm"):   # e.g. start the Antigravity session so the first reply is fast
-        threading.Thread(target=brain.warm, daemon=True, name="brain-warm").start()
+        # ...but not in the first seconds: the voice models load then, and on a busy laptop
+        # everything starting at once starved the voice loop for ~a minute after launch.
+        threading.Thread(target=_after(STARTUP_STAGGER_S, brain.warm), daemon=True,
+                         name="brain-warm").start()
     try:
         _state["httpd"] = server.start(
             brain, perms, hub,
@@ -571,7 +603,7 @@ def main() -> None:
     _start_tray(_summon, brain, panic, quit_app)
     # Kick the cua-driver daemon off-thread: it's a synchronous subprocess.run(timeout=25)
     # whose result we ignore, so it must not gate orb/window cold-start.
-    threading.Thread(target=_ensure_cua_driver, daemon=True).start()
+    threading.Thread(target=_after(STARTUP_STAGGER_S + 10, _ensure_cua_driver), daemon=True).start()
     if not _state.get("dormant"):
         _launch_orb()    # when dormant we stay fully hidden — the orb appears only on wake
     else:
@@ -691,6 +723,14 @@ def _kill_orb() -> None:
         pass
 
 
+def _orb_alive() -> bool:
+    pid, ctime = _read_orb_pid()
+    if _orb_pid_is_live_orb(pid, ctime):
+        return True
+    op = _state.get("orb_proc")
+    return op is not None and op.poll() is None
+
+
 def _launch_orb() -> None:
     """Launch the transparent orb as its own tkinter process.
 
@@ -800,28 +840,39 @@ def _make_voice_toggle(hub):
     `want` is what the button asked for (True = on); the call is idempotent, so a button showing a
     stale state can't switch the listener off when the user meant "on". want=None flips.
     Returns the resulting running state so the UI can update immediately."""
-    def toggle(want: bool | None = None) -> bool:
-        alive = _voice_alive()
-        if want is None:
-            want = not alive
-        if want and alive:
-            return True
-        if not want and not alive:
-            return False
-        if not want:
-            _kill_voice()
-            try:
-                conf.update_settings({"voice.enabled": False})  # button is the source of truth
-            except Exception:
-                pass
-            hub.publish("voice", {"state": "off"})
-            conf.log("app", "voice daemon stopped (toggle)")
-            return False
+    lock = threading.Lock()
+
+    def _settings(**kv):
         try:
-            conf.update_settings({"voice.enabled": True})
+            conf.update_settings({f"voice.{k}": v for k, v in kv.items()})
         except Exception:
             pass
-        return _launch_voice()
+
+    def toggle(want: bool | None = None) -> bool:
+        # "Off" MUTES rather than kills: the listener stays up in clap-only mode, so a
+        # double-clap turns the mic back on (and restarting the heavy speech models on every
+        # click was a big source of lag). Serialized so two quick clicks can't race.
+        with lock:
+            alive = _voice_alive()
+            muted = bool(conf.voice_cfg().get("muted", False))
+            if want is None:
+                want = not (alive and not muted)
+            if want:
+                _settings(enabled=True, muted=False)
+                if alive:
+                    hub.publish("control", {"action": "unmute"})
+                    hub.publish("voice", {"state": "idle"})
+                    conf.log("app", "voice unmuted")
+                    return True
+                return _launch_voice()
+            _settings(enabled=True, muted=True)
+            if alive:
+                hub.publish("control", {"action": "mute"})
+            else:
+                _launch_voice()          # starts muted: clap-only, so a clap can turn it back on
+            hub.publish("voice", {"state": "off"})
+            conf.log("app", "voice muted (a double-clap turns it back on)")
+            return False
     return toggle
 
 

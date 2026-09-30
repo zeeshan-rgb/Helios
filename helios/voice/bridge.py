@@ -50,6 +50,11 @@ class AppBridge:
         /summon also un-dormants: reveals the orb, opens the configured apps, shows the dashboard."""
         return self._post("/summon", {})
 
+    def set_voice(self, on: bool) -> bool:
+        """Tell the app the mic was switched on/off here (a clap unmuting it) — the same route
+        as the dashboard mic button, so the setting is persisted and the button updates."""
+        return self._post("/voice/toggle", {"on": bool(on)})
+
     def panic(self) -> bool:
         """Abort the in-flight brain turn (barge-in / stop). POST /panic -> brain.panic(): kills the
         `claude -p` tree, frees the single-flight lock so the next /message isn't rejected as busy."""

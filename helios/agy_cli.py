@@ -32,6 +32,7 @@ from pathlib import Path
 from . import conf
 
 CREATE_NO_WINDOW = 0x08000000
+BELOW_NORMAL_PRIORITY = 0x00004000
 AGY_DIR = conf.DATA_DIR / "antigravity"
 WORKSPACE = AGY_DIR / "workspace"      # the live session's cwd
 RUNS_DIR = AGY_DIR / "runs"            # throwaway cwd per side agent / helper call
@@ -278,10 +279,14 @@ class AgySession:
         self._drain: threading.Thread | None = None
 
     def start(self) -> subprocess.Popen:
+        # One-shot runs (research, lesson extraction, side agents) are background work: below-
+        # normal priority, so they never make voice or the dashboard stutter. The live
+        # conversation session (stream_input) keeps normal priority.
+        flags = CREATE_NO_WINDOW | (0 if self.stream_input else BELOW_NORMAL_PRIORITY)
         self.proc = subprocess.Popen(
             self.args, stdin=subprocess.PIPE if self.stream_input else subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-            errors="replace", bufsize=1, creationflags=CREATE_NO_WINDOW,
+            errors="replace", bufsize=1, creationflags=flags,
             cwd=str(self.handle["ws"]), env=self.env)
         self._drain = threading.Thread(target=self._drain_stderr, daemon=True)
         self._drain.start()

@@ -110,7 +110,7 @@ def _screen_content_verdict(tool_name: str, tool_input: dict) -> tuple[str, str]
     return "allow", ""
 
 try:
-    from helios import conf, permissions
+    from helios import conf, permissions, protected
 except Exception as e:  # pragma: no cover
     # Can't even load policy -> deny risky-by-default, but let reads through.
     print(json.dumps({"hookSpecificOutput": {
@@ -161,6 +161,16 @@ def decide(tool_name: str, tool_input: dict, session_id: str = "") -> tuple[str,
     # this never touches normal use.
     if os.environ.get("HELIOS_AGENT_ROLE") == "side" and permissions.is_outbound_send(tool_name):
         return "deny", "a background agent can't send outbound messages — only the live assistant can, with your ok"
+
+    # Credential stores and secrets (SSH keys, password managers, browser credential stores, API
+    # credential files, cloud credentials, Helios's own secrets): hard-deny any file/shell access —
+    # even listing — for every caller, and even in YOLO mode. Only an explicit entry in
+    # [security] allow_protected lets a location through to the normal (asking) policy.
+    cat = protected.tool_check(tool_name, tool_input)
+    if cat:
+        conf.log("security", f"DENY {tool_name}: protected ({cat})"
+                             + (" [background agent]" if os.environ.get("HELIOS_AGENT_ROLE") == "side" else ""))
+        return "deny", protected.deny_reason(cat)
 
     # Computer-use is physical/dangerous — gate on content safety, then panic + the single-driver lock.
     if tool_name.startswith("mcp__computer__"):

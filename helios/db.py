@@ -152,6 +152,32 @@ CREATE TABLE IF NOT EXISTS recipes (
   steps TEXT NOT NULL,                       -- JSON array of the tool sequence that worked
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sched_jobs (      -- helios/jobs.py: the unified job scheduler
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL,                        -- night_mode | morning_briefing | project_health | ...
+  schedule TEXT NOT NULL,                    -- sched_util format, or 'once <ISO>' for one-shot
+  args TEXT NOT NULL DEFAULT '{}',           -- JSON (e.g. {"project": "Maqsusi"})
+  enabled INTEGER NOT NULL DEFAULT 1,
+  system INTEGER NOT NULL DEFAULT 0,         -- 1 = triggered by its own module (night window, 08:00)
+  next_run TEXT,                             -- NULL = nothing scheduled (e.g. a one-shot that ran)
+  last_run TEXT,
+  last_status TEXT,                          -- ok | failed | skipped | missed | interrupted | running
+  last_summary TEXT,
+  fail_count INTEGER NOT NULL DEFAULT 0,     -- consecutive failures (auto-pause at the limit)
+  running INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'user'
+);
+CREATE TABLE IF NOT EXISTS sched_runs (      -- execution history, one row per run
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL,
+  trigger TEXT NOT NULL,                     -- schedule | catch-up | manual | system
+  summary TEXT
+);
 """
 
 

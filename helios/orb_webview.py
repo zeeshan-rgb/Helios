@@ -161,7 +161,7 @@ def _clear_pid():
 
 
 _stop = threading.Event()
-_S = {"hwnd": 0, "opaque": False, "window": None, "dash_hidden": False}   # shared between threads + main()
+_S = {"hwnd": 0, "opaque": False, "window": None, "dash_hidden": False, "asleep": False}   # shared between threads + main()
 
 
 def _events():
@@ -188,6 +188,10 @@ def _events():
                             _S["dash_hidden"] = True
                         elif action == "dashboard_hidden":
                             _S["dash_hidden"] = False
+                        elif action == "sleep":
+                            _S["asleep"] = True
+                        elif action == "wake":
+                            _S["asleep"] = False
         except Exception:
             time.sleep(2.0)
         else:
@@ -288,7 +292,7 @@ def _manage():
     hidden = False
     while not _stop.is_set():
         try:
-            want_hidden = _fullscreen_on_primary(hwnd) or _S.get("dash_hidden")
+            want_hidden = _fullscreen_on_primary(hwnd) or _S.get("dash_hidden") or _S.get("asleep")
             if want_hidden and not hidden:
                 _u.ShowWindow(hwnd, SW_HIDE); hidden = True
             elif not want_hidden and hidden:

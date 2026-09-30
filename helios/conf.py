@@ -11,6 +11,7 @@ a bad config falls back to safe defaults rather than crashing the whole app.
 from __future__ import annotations
 
 import os
+import re
 import secrets as _secrets
 import shutil
 import threading
@@ -307,10 +308,27 @@ def auth_token() -> str | None:
     return _auth_token_cache
 
 
+# API keys / tokens / private keys — redacted from every log line (and from memory notes, which
+# reuse this pattern as memory._SECRET_RE). Narrow on purpose: real key shapes, not the word "key".
+SECRET_RE = re.compile(
+    r"(sk-[A-Za-z0-9_-]{16,}"
+    r"|gsk_[A-Za-z0-9]{20,}"
+    r"|csk-[A-Za-z0-9]{16,}"
+    r"|AIza[A-Za-z0-9_-]{20,}"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|github_pat_[A-Za-z0-9_]{20,}"
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"
+    r"|(?:AKIA|ASIA)[A-Z0-9]{16}"
+    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|Bearer\s+[A-Za-z0-9._-]{16,})", re.I)
+
+
 def log(name: str, msg: str) -> None:
-    """Lightweight append logger -> logs/<name>.log."""
+    """Lightweight append logger -> logs/<name>.log. Secret-shaped strings never reach the file."""
     import time
     try:
+        msg = SECRET_RE.sub("[redacted]", str(msg))
         with (LOGS_DIR / f"{name}.log").open("a", encoding="utf-8") as fh:
             fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}\n")
     except Exception:

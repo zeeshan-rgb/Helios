@@ -141,6 +141,21 @@ class Scheduler:
         except Exception as e:  # pragma: no cover
             conf.log("scheduler", f"night mode tick error: {e}")
 
+        # 3e) Morning briefing: prepared once a day at/after [briefing].time (after the night tick,
+        # so a missed night is already on record).
+        try:
+            from . import briefing
+            briefing.tick(now, emit=self.emit)
+        except Exception as e:  # pragma: no cover
+            conf.log("scheduler", f"briefing tick error: {e}")
+
+        # 3f) Scheduled jobs (helios/jobs.py): due user jobs start on their own threads.
+        try:
+            from . import jobs
+            jobs.tick(now, emit=self.emit)
+        except Exception as e:  # pragma: no cover
+            conf.log("scheduler", f"jobs tick error: {e}")
+
         # 4) proactive observers (~every 5 min)
         if datetime.now() >= self._next_observe:
             self._next_observe = datetime.now() + timedelta(minutes=5)

@@ -29,6 +29,20 @@ def _isolate_runtime_flags(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(conf, "ABORT_FLAG", d / "abort.flag")
     monkeypatch.setattr(conf, "YOLO_FLAG", d / "yolo.flag")
     monkeypatch.setattr(conf, "SCREEN_LOCK", d / "screen.lock")
+    # ...and never the real helios.db (Night Mode / the briefing now record runs in job history).
+    from helios import db, jobs
+    monkeypatch.setattr(db, "DB_PATH", d / "helios.db")
+    monkeypatch.setattr(jobs, "_first_tick", True)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_toasts(monkeypatch):
+    """Tests never pop real Windows notifications. (They used to: Night Mode / jobs / briefing
+    tests fired dozens of real toasts per run onto the user's desktop, each one spawning a
+    PowerShell process.) Tests that check notifying patch notify.toast themselves."""
+    from helios import notify
+    monkeypatch.setattr(notify, "toast", lambda *a, **k: None)
+    monkeypatch.setattr(notify, "_launch", lambda *a, **k: None, raising=False)
 
 
 @pytest.fixture(autouse=True)

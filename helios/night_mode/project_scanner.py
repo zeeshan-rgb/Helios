@@ -21,6 +21,9 @@ def sync_projects(ctx: dict) -> Result:
         if c["error"] and not (c["commits"] or c["files"]):
             res.failed.append(f"{p['name']}: {c['error']}")
             continue
+        res.data[p["name"]] = {"git": c["git"], "commits": len(c["commits"]),
+                               "uncommitted": len(c["uncommitted"]),
+                               "files": c.get("files_total", 0)}
         if c["git"]:
             bits = []
             if c["commits"]:

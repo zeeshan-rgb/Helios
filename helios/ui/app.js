@@ -139,10 +139,31 @@ function sphereEdges(nodes, maxD2) {
     }
   return e;
 }
+// Soft glow sprite (radial gradient, drawn once per colour) — far cheaper per node than
+// canvas shadowBlur, which matters on machines that composite in software.
+function glowSprite(r, g, b) {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const x = c.getContext("2d"), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, `rgba(${Math.min(255, r + 90)},${Math.min(255, g + 70)},${Math.min(255, b + 60)},1)`);
+  gr.addColorStop(0.18, `rgba(${r},${g},${b},.9)`);
+  gr.addColorStop(0.45, `rgba(${r},${g},${b},.22)`);
+  gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  return c;
+}
 class NeuralViz {
   constructor(canvas, opts) {
     this.cv = canvas; this.ctx = canvas.getContext("2d");
-    this.o = Object.assign({ n: 26, edgeD2: 0.55, lineW: 1, fps: 30, pulses: true }, opts || {});
+    this.o = Object.assign({ n: 26, edgeD2: 0.55, lineW: 1, fps: 30, pulses: true,
+                             sprite: false, nodeScale: 1, hidpi: false }, opts || {});
+    this._sprite = null; this._spriteRGB = "";
+    if (this.o.hidpi) {   // keep the canvas crisp at its CSS size × devicePixelRatio
+      const fit = () => {
+        const s = Math.round(this.cv.clientWidth * Math.min(2, window.devicePixelRatio || 1));
+        if (s > 0 && this.cv.width !== s) { this.cv.width = this.cv.height = s; }
+      };
+      fit(); window.addEventListener("resize", fit);
+    }
     this.nodes = sphereNodes(this.o.n);
     this.edges = sphereEdges(this.nodes, this.o.edgeD2);
     this.state = "idle"; this.cur = [77, 208, 225]; this.spin = 0.22; this.pulseHz = 0.9;
@@ -180,7 +201,7 @@ class NeuralViz {
 
     const ctx = this.ctx, W = this.cv.width, H = this.cv.height, cx = W / 2, cy = H / 2;
     const pulse = 0.93 + 0.07 * Math.sin(this.t * this.pulseHz * Math.PI);
-    const R = (Math.min(W, H) * 0.36) * pulse * (1 + 0.18 * this.levelSmooth);
+    const R = (Math.min(W, H) * (this.o.radius || 0.36)) * pulse * (1 + 0.18 * this.levelSmooth);
     const ca = Math.cos(this.ang), sa = Math.sin(this.ang);
     const tilt = 0.42, ct = Math.cos(tilt), st = Math.sin(tilt);
     const pts = this.nodes.map(p => {
@@ -191,13 +212,23 @@ class NeuralViz {
     });
     const [r, gg, b] = this.cur.map(Math.round);
     ctx.clearRect(0, 0, W, H);
-    // links, depth-dimmed
-    ctx.lineWidth = this.o.lineW;
+    // links, depth-dimmed — batched into 4 depth bands (4 strokes a frame instead of hundreds)
+    ctx.lineWidth = this.o.lineW * (this.o.hidpi ? W / 440 : 1);
+    const bands = [[], [], [], []];
     for (const [i, j] of this.edges) {
       const d = (pts[i][2] + pts[j][2]) / 2;
-      ctx.strokeStyle = `rgba(${r},${gg},${b},${(0.06 + 0.2 * d).toFixed(3)})`;
-      ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[j][0], pts[j][1]); ctx.stroke();
+      bands[Math.min(3, (d * 4) | 0)].push(i, j);
     }
+    bands.forEach((bd, k) => {
+      if (!bd.length) return;
+      ctx.strokeStyle = `rgba(${r},${gg},${b},${(0.05 + 0.07 * k).toFixed(3)})`;
+      ctx.beginPath();
+      for (let q = 0; q < bd.length; q += 2) {
+        const p = pts[bd[q]], s = pts[bd[q + 1]];
+        ctx.moveTo(p[0], p[1]); ctx.lineTo(s[0], s[1]);
+      }
+      ctx.stroke();
+    });
     // signal sparks travel a link then die; spawn rate scales with activity
     if (this.o.pulses && !REDUCED_MOTION) {
       const live = this.state !== "idle";
@@ -212,7 +243,23 @@ class NeuralViz {
         ctx.beginPath(); ctx.arc(x, y, this.o.lineW * 1.6, 0, 7); ctx.fill();
       }
     }
-    // nodes, front bigger + brighter, soft glow via shadowBlur
+    // nodes, front bigger + brighter
+    if (this.o.sprite) {
+      // glow sprites (the big brain): one drawImage per node, back-to-front
+      const key = `${r},${gg},${b}`;
+      if (!this._sprite || this._spriteKey !== key) {
+        this._sprite = glowSprite(r, gg, b); this._spriteKey = key;
+      }
+      const unit = (Math.min(W, H) / 90) * this.o.nodeScale;
+      pts.slice().sort((a, c) => a[2] - c[2]).forEach(p => {
+        const d = p[2], s = (1.4 + 4.2 * d) * unit * (1 + 0.25 * this.levelSmooth);
+        ctx.globalAlpha = 0.3 + 0.7 * d;
+        ctx.drawImage(this._sprite, p[0] - s, p[1] - s, s * 2, s * 2);
+      });
+      ctx.globalAlpha = 1;
+      return;
+    }
+    // small canvases: soft glow via shadowBlur
     for (const p of pts) {
       const d = p[2], rad = (0.55 + 1.5 * d) * (Math.min(W, H) / 90);
       ctx.shadowColor = `rgba(${r},${gg},${b},.8)`; ctx.shadowBlur = 4 * d * (W / 90);
@@ -223,10 +270,16 @@ class NeuralViz {
   }
 }
 const dotViz = new NeuralViz(g("dot"), { n: 9, edgeD2: 1.1, lineW: 1, fps: 24, pulses: false });
-const emblemViz = new NeuralViz(g("emblem"), { n: 34, edgeD2: 0.42, lineW: 1.1, fps: 30, pulses: true });
+// The brain: the empty state's centrepiece — the desktop orb's neural sphere, full size.
+const emblemViz = new NeuralViz(g("emblem"), { n: 96, edgeD2: 0.17, lineW: 1.1, fps: 30, pulses: true,
+                                               sprite: true, nodeScale: 0.55, hidpi: true,
+                                               radius: 0.5 });
 dotViz.start(); emblemViz.start();
 // One shared "presence" state feeding both canvases (voice owns it while active, like the orb).
-function setUiState(s) { dotViz.setState(s); emblemViz.setState(s); }
+function setUiState(s) {
+  dotViz.setState(s); emblemViz.setState(s);
+  document.body.dataset.presence = VIZ_STATES[s] ? s : "idle";   // tints the brain's halo/rings
+}
 
 // --- voice HUD + mic button ---------------------------------------------------------------
 function setMic(on, live) {
