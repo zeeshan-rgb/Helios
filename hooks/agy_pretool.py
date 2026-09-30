@@ -111,13 +111,22 @@ def _protected_roots() -> list[str]:
     return sorted(roots)
 
 
+def _projects_config(s: str) -> bool:
+    try:
+        from helios import permissions
+        return permissions.is_projects_config(s)
+    except Exception:
+        return False
+
+
 def _touches_protected(name: str, inp: dict) -> bool:
     if name == "PowerShell":
         cmd = str(inp.get("command", "")).replace("\\", "/").lower()
-        return any(s in cmd for s in (".agents", ".gemini", "hooks.json", "mcp_config.json"))
+        return (any(s in cmd for s in (".agents", ".gemini", "hooks.json", "mcp_config.json"))
+                or _projects_config(cmd))
     if name in ("Write", "Edit", "NotebookEdit"):
         p = str(inp.get("file_path") or inp.get("notebook_path") or "").replace("\\", "/").lower()
-        return ("/.agents/" in p or p.endswith("/.agents")
+        return ("/.agents/" in p or p.endswith("/.agents") or _projects_config(p)
                 or any(p == r or p.startswith(r + "/") for r in _protected_roots()))
     return False
 
@@ -147,9 +156,31 @@ def _sink() -> str:
     return s
 
 
+_RESEARCH_TOOLS = {"search_web", "read_url_content"}
+
+
+def _allow_only_decide(tool_name: str, tool_input: dict, allowed_env: str) -> tuple[str, str]:
+    """Research mode (set only by Helios's own code): web search + reading PUBLIC pages, nothing
+    else — no files, commands, MCP tools or browser. The env list can never grant more than
+    _RESEARCH_TOOLS."""
+    allowed = {t.strip() for t in allowed_env.split(",")} & _RESEARCH_TOOLS
+    if tool_name not in allowed:
+        return "deny", "research mode: only web search and reading public pages are allowed"
+    if tool_name == "read_url_content":
+        from helios import permissions
+        url = _first(tool_input or {}, "Url", "URL", "url")
+        urls = _URL_RX.findall(url)
+        if not urls or any(permissions.is_internal_url(u) for u in urls):
+            return "deny", "research mode: only public http(s) pages may be read"
+    return "allow", "research mode: read-only web access"
+
+
 def agy_decide(tool_name: str, tool_input: dict, conversation_id: str = "") -> tuple[str, str]:
     if os.environ.get("HELIOS_AGY_DENY_ALL") == "1":
         return "deny", "tools are disabled for this call"
+    allow_only = os.environ.get("HELIOS_AGY_ALLOW_ONLY")
+    if allow_only is not None:
+        return _allow_only_decide(tool_name, tool_input, allow_only)
     if tool_name in _HELIOS_OWNED:
         return "deny", ("Helios owns scheduling and messaging — use Helios's reminders/routines "
                         "(mcp helios set_reminder / create_routine) instead.")

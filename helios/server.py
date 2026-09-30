@@ -370,12 +370,14 @@ class Handler(BaseHTTPRequestHandler):
             self.app["hub"].publish("voice", data)
             return self._send(200, b'{"ok":true}')
         if path == "/voice/toggle":
-            # The dashboard mic button flips the voice daemon on/off at runtime (no restart).
+            # The dashboard mic button turns the voice daemon on/off at runtime (no restart). The
+            # body says what the button wants ({"on": true|false}); no body = flip.
             cb = self.app.get("voice_toggle")
             running = False
+            want = self._json_body().get("on")
             if cb:
                 try:
-                    running = bool(cb())
+                    running = bool(cb(want) if isinstance(want, bool) else cb())
                 except Exception as e:  # pragma: no cover
                     conf.log("server", f"voice toggle error: {e}")
             return self._send(200, json.dumps({"running": running}).encode())
@@ -450,6 +452,17 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:  # pragma: no cover
                     conf.log("server", f"window {path} error: {e}")
             return self._send(200, b'{"ok":true}')
+        if path == "/window/maximize":
+            # The custom title bar's maximize/restore button (and a double-click on the bar):
+            # toggles, and returns the new state so the button can swap its icon.
+            cb = self.app.get("maximize")
+            state = None
+            if cb:
+                try:
+                    state = bool(cb())
+                except Exception as e:  # pragma: no cover
+                    conf.log("server", f"window {path} error: {e}")
+            return self._send(200, json.dumps({"ok": cb is not None, "maximized": state}).encode())
         if path == "/window/resize":
             # Custom edge/corner resize zones (the frameless window has no native sizing border).
             # fixx/fixy say which edge stays put (the side opposite the one being dragged).
@@ -618,7 +631,7 @@ class _Server(ThreadingHTTPServer):
 
 def start(brain, perms, hub, toggle=None, summon=None,
           minimize=None, close=None, voice_toggle=None, sleep=None,
-          resize=None) -> ThreadingHTTPServer:
+          resize=None, maximize=None) -> ThreadingHTTPServer:
     """Boot the HTTP/SSE server on a daemon thread and return the running server.
 
     brain    — the LLM brain (run_turn/panic/busy/session/conversation control).
@@ -629,6 +642,8 @@ def start(brain, perms, hub, toggle=None, summon=None,
                app launch calls this instead of opening the dashboard URL in a browser).
     minimize — optional callback for /window/minimize (frameless window's custom – button).
     close    — optional callback for /window/close (frameless window's custom ✕ → hide to orb).
+    maximize — optional callback for /window/maximize (toggle maximize/restore; returns the new
+               state: True = maximized).
     voice_toggle — optional callback for /voice/toggle (start/stop the voice daemon); returns
                True if voice is now running.
     sleep    — optional callback for /sleep (power menu: hide dashboard + orb, go dormant).
@@ -640,7 +655,7 @@ def start(brain, perms, hub, toggle=None, summon=None,
     httpd.app = {"brain": brain, "perms": perms, "hub": hub,  # type: ignore[attr-defined]
                  "toggle": toggle, "summon": summon,
                  "minimize": minimize, "close": close, "voice_toggle": voice_toggle,
-                 "sleep": sleep, "resize": resize,
+                 "sleep": sleep, "resize": resize, "maximize": maximize,
                  "quit": None}  # quit is wired post-init (needs quit_app)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     conf.log("server", f"listening on {conf.BASE_URL}")

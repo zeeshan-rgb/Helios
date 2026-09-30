@@ -531,6 +531,100 @@ def reject_lesson(lesson_id: str) -> str:
 
 
 @mcp.tool()
+def list_projects(include_inactive: bool = False) -> str:
+    """The user's configured projects ("what projects are active?"): technology, status and the
+    result of the last health checks. Projects are defined by the user's manifests only."""
+    from helios import projects
+    return projects.format_list(include_inactive)
+
+
+@mcp.tool()
+def project_changes(project: str = "", hours: float = 24) -> str:
+    """What changed in the user's projects recently ("what changed since yesterday?"): commits and
+    uncommitted files for git projects, recently modified files otherwise. Default: every active
+    project, last 24 hours."""
+    from helios import projects
+    try:
+        return projects.format_changes(projects.all_changes(max(1.0, min(hours, 24 * 31)),
+                                                            project or None))
+    except KeyError as e:
+        return str(e)
+
+
+@mcp.tool()
+def project_health(project: str = "") -> str:
+    """What is broken / which projects need attention, from the last health checks plus git state
+    and manifest problems. Does not run anything — use run_project_checks for fresh results."""
+    from helios import projects
+    if project:
+        p = projects.get(project)
+        if not p:
+            return f"No project called {project!r}."
+        reasons = projects.attention(p)
+        return f"{p['name']}: " + ("; ".join(reasons) if reasons else "looks fine")
+    return ("BROKEN\n" + projects.format_broken() + "\n\nNEEDS ATTENTION\n"
+            + projects.format_attention())
+
+
+@mcp.tool()
+def run_project_checks(project: str = "", check: str = "") -> str:
+    """Run the health checks the user configured for a project (or all active projects): tests,
+    lint, builds exactly as written in the manifest — never push/publish/deploy/delete. Can take
+    minutes; say so before starting."""
+    from helios import projects
+    try:
+        return projects.format_checks(projects.run_checks(project or None, check or None))
+    except projects.Busy as e:
+        return f"Not started: {e}."
+    except KeyError as e:
+        return str(e)
+
+
+@mcp.tool()
+def night_mode_status() -> str:
+    """Night Mode (overnight maintenance): on/off, the next window and its tasks, and how the
+    last few nights went (completed / with errors / missed and why)."""
+    from helios import night_mode
+    return night_mode.status_text()
+
+
+@mcp.tool()
+def night_report(night: str = "") -> str:
+    """The latest Night Mode report ("what happened overnight?"), or one night's by id
+    (e.g. 2026-09-30). Sections: completed, observed, suggested, needs approval, failed, skipped.
+    Report only what it says — never claim something succeeded that isn't listed as completed."""
+    from helios import night_mode
+    return night_mode.latest_report(night or None)
+
+
+@mcp.tool()
+def research_findings(topic: str = "", query: str = "", days: float = 14, details: bool = False) -> str:
+    """What Helios's research found ("any news on MCP?", "what did you research last night?"):
+    sourced findings from the research library, newest first, optionally one topic / keywords /
+    last N days. These are research notes, not facts about the user — cite the source and
+    mention low confidence or unopened sources."""
+    from helios import research
+    items = research.findings(topic or None, days=days or None, query=query, limit=25)
+    return research.format_findings(items, verbose=details)
+
+
+@mcp.tool()
+def research_topics() -> str:
+    """The topics Helios researches overnight (settings + project manifests), and when each was
+    last researched. The user changes them in settings.toml [research] or a project manifest."""
+    from helios import research
+    last = research._state().get("last", {})
+    ts = research.topics()
+    if not ts:
+        return "No research topics configured."
+    state = "ON" if research.enabled() else "OFF"
+    return f"Research is {state}.\n" + "\n".join(
+        f"- {t['topic']}" + (f" (project {t['project']})" if t["project"] else "")
+        + f": last researched {last.get(t['topic'].lower(), 'never')[:16].replace('T', ' ')}"
+        for t in ts)
+
+
+@mcp.tool()
 def set_screen_awareness(on: bool) -> str:
     """Turn opt-in screen awareness on/off ('watch my screen' / 'stop watching'). When ON,
     Helios periodically glances at the screen and proactively offers help if it notices

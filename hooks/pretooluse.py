@@ -184,6 +184,12 @@ def decide(tool_name: str, tool_input: dict, session_id: str = "") -> tuple[str,
         _p = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
         if permissions.is_claude_dir(_p):
             return "deny", "Helios does not write to Claude Code's config/memory dir; memory is the Obsidian vault."
+        if permissions.is_projects_config(_p):
+            return "deny", "project manifests decide which commands Helios runs — only the user edits them."
+    # The same folder via a shell (Set-Content, copy, etc.): hard-deny, bites even in YOLO.
+    elif tool_name in ("Bash", "PowerShell") and permissions.is_projects_config(
+            str(tool_input.get("command", ""))):
+        return "deny", "project manifests decide which commands Helios runs — only the user edits them."
     # YOLO mode: auto-approve everything that would otherwise pop an Approve/Deny prompt, for the
     # current chat. Placed AFTER the hard-rails above (panic + SSRF + ~/.claude + destructive screen
     # actions) so those still bite even in YOLO — it only short-circuits the classify()->ask path.

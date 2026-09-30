@@ -154,14 +154,16 @@ def test_talk_and_dictation_hotkeys_registered():
     assert VoiceDaemon._hotkey_map(d) == {}
 
 
-def test_double_clap_window_accepts_a_relaxed_pair():
+def test_double_clap_window_accepts_a_natural_pair():
+    # 2026-09-30: the window was 1.5s (phase 2) but that let background noises pair up; the user
+    # asked for less sensitivity, so it is now 1.0s — see tests/test_clap_sensitivity.py.
     from helios.voice.clap import ClapDetector
     c = ClapDetector(sensitivity=0.1)
     quiet = np.zeros(1280, dtype="int16")
     clap = np.zeros(1280, dtype="int16")
     clap[100:260] = 20000
     fired = False
-    for frame in [quiet] * 10 + [clap] + [quiet] * 16 + [clap] + [quiet] * 3:   # ~1.36s apart
+    for frame in [quiet] * 10 + [clap] + [quiet] * 9 + [clap] + [quiet] * 3:    # ~0.8s apart
         fired = c.feed(frame) or fired
     assert fired
 

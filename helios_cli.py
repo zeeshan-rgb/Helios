@@ -15,6 +15,7 @@ Commands:
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -436,6 +437,128 @@ def cmd_update(_args) -> int:
     return 0
 
 
+def cmd_projects(args) -> int:
+    """Project manifests: `helios projects [list [--all] | add <folder> [--name N] [--force] |
+    changes [name] [--hours N] | check [name] [--only CHECK] | health | show <name>]`."""
+    conf = _conf()
+    from helios import projects
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "list"
+
+    def opt(flag, default=None):
+        if flag in args:
+            i = args.index(flag)
+            val = args[i + 1] if i + 1 < len(args) else default
+            del args[i:i + 2]
+            return val
+        return default
+
+    try:
+        if action == "list":
+            print(projects.format_list(include_inactive="--all" in args))
+        elif action == "add" and args:
+            name, force = opt("--name"), "--force" in args
+            args = [a for a in args if a != "--force"]
+            f = projects.add(" ".join(args), name, overwrite=force)
+            print(f"Wrote {f}\n\n{f.read_text(encoding='utf-8')}\nReview and edit it; "
+                  "`helios projects check <name>` runs its health checks.")
+        elif action == "changes":
+            hours = float(opt("--hours", 24))
+            print(projects.format_changes(projects.all_changes(hours, " ".join(args) or None)))
+        elif action == "check":
+            only = opt("--only")
+            print(projects.format_checks(projects.run_checks(" ".join(args) or None, only)))
+        elif action == "health":
+            print("BROKEN\n" + projects.format_broken() + "\n\nNEEDS ATTENTION\n"
+                  + projects.format_attention())
+        elif action == "show" and args:
+            p = projects.get(" ".join(args))
+            if not p:
+                print("No such project.")
+                return 1
+            print(json.dumps({k: v for k, v in p.items()} | {"state": projects.state(p)},
+                             indent=1, default=str)[:6000])
+        else:
+            print(cmd_projects.__doc__.split(":", 1)[1].strip())
+            return 2
+    except (KeyError, ValueError, FileExistsError, projects.Busy) as e:
+        print(f"Error: {e}")
+        return 1
+    print(f"\n(manifests: {conf.projects_dir()})")
+    return 0
+
+
+def cmd_night(args) -> int:
+    """Night Mode: `helios night [status | run [--only task1,task2] | report [night] |
+    on | off]`. `run` runs every scheduled task right now (a manual run)."""
+    conf = _conf()
+    from helios import night_mode
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "status"
+    if action == "status":
+        print(night_mode.status_text())
+    elif action == "run":
+        only = None
+        if "--only" in args:
+            i = args.index("--only")
+            only = [t.strip() for t in (args[i + 1] if i + 1 < len(args) else "").split(",") if t.strip()]
+        print("Running Night Mode now (this can take several minutes)...")
+        rec = night_mode.run_night(only=only)
+        if rec.get("status") in ("busy", "duplicate"):
+            print(f"Not started: {rec['reason']}.")
+            return 1
+        print(night_mode.latest_report(rec["night"]))
+        print(f"(report: {rec.get('report')})")
+    elif action == "report":
+        print(night_mode.latest_report(args[0] if args else None))
+    elif action in ("on", "off"):
+        conf.update_settings({"night_mode.enabled": action == "on"})
+        print(f"Night Mode is now {action.upper()} (restart Helios if it's running).")
+    else:
+        print(cmd_night.__doc__.split(":", 1)[1].strip())
+        return 2
+    return 0
+
+
+def cmd_research(args) -> int:
+    """Research: `helios research [topics | run [topic ...] | findings [topic] [--days N] |
+    show <id> | keep <id>]`. `keep` copies one finding into memory (findings never go there
+    on their own)."""
+    _conf()
+    from helios import research
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "findings"
+    days = None
+    if "--days" in args:
+        i = args.index("--days")
+        days = float(args[i + 1]) if i + 1 < len(args) else None
+        del args[i:i + 2]
+    if action == "topics":
+        last = research._state().get("last", {})
+        for t in research.topics():
+            proj = f" (project {t['project']})" if t["project"] else ""
+            print(f"- {t['topic']}{proj}: last {last.get(t['topic'].lower(), 'never')[:16]}")
+        print(f"\nnext run: {', '.join(t['topic'] for t in research.pick())}")
+    elif action == "run":
+        names = [" ".join(args)] if args else None
+        print("Researching (about a minute or two per topic)...")
+        print(research.format_run(research.run(names)))
+        print(f"\n(library: {research.library()})")
+    elif action == "findings":
+        print(research.format_findings(research.findings(" ".join(args) or None, days=days),
+                                       verbose=True))
+    elif action == "show" and args:
+        f = research.get(args[0])
+        print(research.format_findings([f], verbose=True) if f else "No such finding.")
+    elif action == "keep" and args:
+        res = research.keep(args[0])
+        print(f"{res['status']}: {res.get('reason') or res['item']['text'][:120]}")
+    else:
+        print(cmd_research.__doc__.split(":", 1)[1].strip())
+        return 2
+    return 0
+
+
 _COMMANDS = {
     "onboard": cmd_onboard, "setup": cmd_onboard,
     "start": cmd_start, "stop": cmd_stop, "restart": cmd_restart,
@@ -445,6 +568,9 @@ _COMMANDS = {
     "voice-check": cmd_voice_check,
     "memory": cmd_memory,
     "learn": cmd_learn,
+    "projects": cmd_projects,
+    "night": cmd_night,
+    "research": cmd_research,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -459,6 +585,9 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  voice-check   check mic/speaker, TTS, speech-to-text and wake word (--speak to hear it)\n"
           "  memory        list / search / forget what Helios remembers\n"
           "  learn         learn lessons from today's conversations; review / approve / reject\n"
+          "  projects      list / add / changes / check / health of your configured projects\n"
+          "  night         Night Mode: status / run now / last report / on / off\n"
+          "  research      research topics / run now / findings / keep one in memory\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

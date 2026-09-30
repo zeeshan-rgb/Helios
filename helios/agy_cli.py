@@ -41,6 +41,8 @@ GATE_SCRIPT = conf.HOOKS_DIR / "agy_pretool.py"
 MARKER_SCRIPT = conf.HOOKS_DIR / "agy_marker.py"
 MARKER_ENV = "HELIOS_AGY_MARKER"
 DENY_ALL_ENV = "HELIOS_AGY_DENY_ALL"
+ALLOW_ONLY_ENV = "HELIOS_AGY_ALLOW_ONLY"   # research mode: the gate allows only these tools
+RESEARCH_TOOLS = frozenset({"search_web", "read_url_content"})
 SINK_ENV = "HELIOS_AGY_SINK_FILE"
 
 # Router tier -> agy model slug (see `agy models`); the live session uses [antigravity].model.
@@ -230,13 +232,17 @@ def base_args(model: str = "", *, stream_input: bool, resume: str | None = None,
 
 
 def child_env(marker: Path, *, tools: bool = True, extra: dict | None = None,
-              sink_file: Path | None = None) -> dict:
+              sink_file: Path | None = None, allow_only: frozenset | set | None = None) -> dict:
     e = dict(os.environ)
     e[MARKER_ENV] = str(marker)
     if tools:
         e.pop(DENY_ALL_ENV, None)
     else:
         e[DENY_ALL_ENV] = "1"
+    if allow_only:
+        e[ALLOW_ONLY_ENV] = ",".join(sorted(set(allow_only) & RESEARCH_TOOLS)) or "-"
+    else:
+        e.pop(ALLOW_ONLY_ENV, None)
     if sink_file is not None:
         e[SINK_ENV] = str(sink_file)
     else:
@@ -258,13 +264,14 @@ class AgySession:
 
     def __init__(self, handle: dict, model: str = "", *, resume: str | None = None,
                  prompt: str | None = None, tools: bool = True, extra_env: dict | None = None,
-                 sink_file: Path | None = None):
+                 sink_file: Path | None = None, allow_only: frozenset | set | None = None):
         MARKERS_DIR.mkdir(parents=True, exist_ok=True)
         self.handle = handle
         self.marker = MARKERS_DIR / f"{uuid.uuid4().hex}.ok"
         self.stream_input = prompt is None
         self.args = base_args(model, stream_input=self.stream_input, resume=resume, prompt=prompt)
-        self.env = child_env(self.marker, tools=tools, extra=extra_env, sink_file=sink_file)
+        self.env = child_env(self.marker, tools=tools, extra=extra_env, sink_file=sink_file,
+                             allow_only=allow_only)
         self.proc: subprocess.Popen | None = None
         self.stderr: list[str] = []
         self.conversation_id: str | None = resume
@@ -405,8 +412,10 @@ def consume_turn(session: AgySession, *, on_token=None, on_tool=None) -> dict:
 
 def run_once(prompt: str, rules: str, *, model: str = "", tools: bool = True,
              extra_env: dict | None = None, timeout: int = 600, register=None,
-             label: str = "agy", resume: str | None = None) -> dict:
-    """One headless `agy -p` run in a throwaway workspace (side agents, missions, helper calls)."""
+             label: str = "agy", resume: str | None = None,
+             allow_only: frozenset | set | None = None) -> dict:
+    """One headless `agy -p` run in a throwaway workspace (side agents, missions, helper calls).
+    allow_only (research): no MCP servers, and the gate allows ONLY those tools (∩ RESEARCH_TOOLS)."""
     from .proc_util import kill_tree
     res = {"text": "", "conversation_id": None, "errors": [], "gate_failure": None, "tools": []}
     if not command():
@@ -416,9 +425,9 @@ def run_once(prompt: str, rules: str, *, model: str = "", tools: bool = True,
     ws.mkdir(parents=True, exist_ok=True)
     session = None
     try:
-        handle = prepare_workspace(ws, rules, tools=tools)
+        handle = prepare_workspace(ws, rules, tools=tools and not allow_only)
         session = AgySession(handle, model, resume=resume, prompt=neutralize(prompt), tools=tools,
-                             extra_env=extra_env)
+                             extra_env=extra_env, allow_only=allow_only)
         proc = session.start()
         if register:
             try:
