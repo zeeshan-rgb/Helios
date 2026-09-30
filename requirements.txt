@@ -30,6 +30,8 @@ pythonnet>=3.0.3         # pywebview EdgeChromium/WinForms backend on Windows
 
 # Obsidian memory notes
 python-frontmatter>=1.1.0
+# Project manifests (data/projects/*.yaml — read with yaml.safe_load only)
+pyyaml>=6.0
 
 # Desktop toast notifications (reminders, alerts, job-done)
 winotify>=1.1.0

@@ -27,15 +27,23 @@ _SR = 16000
 _SCALE = 32768.0
 
 
+_DECAY_WINDOW = 0.15   # a clap must fall away within this long after its onset...
+_DECAY_RATIO = 0.45    # ...to below this fraction of its peak (speech/music/TV sustain; claps don't)
+
+
 class ClapDetector:
-    def __init__(self, sensitivity: float = 0.1, ratio: float = 8.0,
-                 min_gap: float = 0.1, max_gap: float = 1.5, cooldown: float = 1.2):
-        # sensitivity = the minimum ABSOLUTE peak (0..1) a clap onset must reach (lower = more
+    def __init__(self, sensitivity: float = 0.15, ratio: float = 8.0,
+                 min_gap: float = 0.1, max_gap: float = 1.0, cooldown: float = 1.2,
+                 strong_ratio: float = 1.7):
+        # sensitivity = the minimum ABSOLUTE peak (0..1) each clap onset must reach (lower = more
         #   sensitive; the binding bar in a quiet room).
+        # strong_ratio = at least ONE clap of the pair must reach sensitivity x this — two soft
+        #   background bumps can't pair up into a "double clap".
         # ratio = a clap must ALSO be at least this many times the running ambient AVERAGE level —
         #   adapts to a quiet (windscreened) vs loud mic. Based on average (not peak) ambient so the
         #   bar stays near abs_floor in a quiet room and only rises when the room is genuinely noisy.
         self.abs_floor = float(sensitivity)
+        self.strong = self.abs_floor * float(strong_ratio)
         self.ratio = float(ratio)
         self.min_gap = float(min_gap)
         self.max_gap = float(max_gap)
@@ -43,12 +51,26 @@ class ClapDetector:
         self.alpha = 0.02            # ambient-floor EMA speed (~0.5s time constant on quiet windows)
         self.reset()
 
-    def reset(self):
+    def reset(self, grace: float = 0.0):
+        """Forget any half-heard pair. grace = ignore claps for this many seconds (e.g. right after
+        Sleep, so the click that put Helios to sleep can't wake it again)."""
         self._prev_quiet = True      # was the previous sub-window clearly below the onset bar?
-        self._last_onset = None      # audio-time of the first clap, awaiting a second
-        self._cooldown_until = -1.0
+        self._last_onset = None      # (audio-time, peak) of the first clap, awaiting a second
+        self._cand = None            # (audio-time, peak) of an onset waiting to prove it decays
         self._t = 0.0                # audio clock (seconds), advanced by each frame's length
+        self._cooldown_until = float(grace) if grace else -1.0
         self._baseline = 0.02        # running estimate of the ambient (room) peak level
+
+    def _clap(self, t: float, peak: float) -> bool:
+        """A confirmed (sharp, decaying) clap at audio-time t. True if it completes a pair."""
+        if self._last_onset is not None:
+            t0, p0 = self._last_onset
+            if self.min_gap <= (t - t0) <= self.max_gap and max(p0, peak) >= self.strong:
+                self._last_onset = None
+                self._cooldown_until = t + self.cooldown
+                return True
+        self._last_onset = (t, peak)  # first clap (or a mismatched one restarts the pair)
+        return False
 
     def feed(self, frame_int16) -> bool:
         """Process one mic frame (int16). Returns True exactly once when a double-clap completes."""
@@ -69,20 +91,22 @@ class ClapDetector:
             if peak < thr:
                 self._baseline += (avg - self._baseline) * self.alpha
                 self._baseline = min(max(self._baseline, 0.003), 0.1)   # clamp: never 0, never huge
-            if onset and t >= self._cooldown_until:
-                # Diagnostic: log every clap onset + the bar it cleared, so sensitivity is tunable
-                # from logs/voice.log (clap twice — two onsets but no wake = gap; none = lower
-                # [startup] clap_sensitivity, or the room/mic is too quiet).
+            # An onset only counts once it proves to be a clap: sharp, then gone within ~150ms.
+            if self._cand is not None:
+                ct, cp = self._cand
+                if peak < cp * _DECAY_RATIO:
+                    self._cand = None
+                    conf.log("voice", f"clap (peak {cp:.2f})")
+                    fired = self._clap(ct, cp) or fired
+                elif t - ct > _DECAY_WINDOW:
+                    self._cand = None          # sustained sound (speech, music, TV): not a clap
+            if onset and t >= self._cooldown_until and self._cand is None:
+                # Diagnostic: log every onset + the bar it cleared, so sensitivity is tunable from
+                # logs/voice.log ("clap onset" without a following "clap" = a sustained sound).
                 conf.log("voice", f"clap onset (peak {peak:.2f}, bar {thr:.2f})")
-                if (self._last_onset is not None
-                        and self.min_gap <= (t - self._last_onset) <= self.max_gap):
-                    self._last_onset = None
-                    self._cooldown_until = t + self.cooldown
-                    fired = True
-                else:
-                    self._last_onset = t   # first clap (or one too early/late restarts the pair)
+                self._cand = (t, peak)
         self._t += len(f) / _SR
         # Forget a lone first clap once the window to pair it has passed.
-        if self._last_onset is not None and self._t - self._last_onset > self.max_gap:
+        if self._last_onset is not None and self._t - self._last_onset[0] > self.max_gap:
             self._last_onset = None
         return fired

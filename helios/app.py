@@ -246,6 +246,18 @@ def _sleep() -> None:
     hub = _state.get("hub")
     if hub is not None:
         hub.publish("control", {"action": "sleep"})  # daemon -> clap-only dormant mode
+    if not _voice_alive():
+        # Sleep promises "clap twice to wake", which needs the voice listener. If the mic was
+        # switched off, turn it back on (it boots dormant: clap/wake-word only) — otherwise
+        # Helios could only be woken from the tray.
+        conf.log("app", "sleep: voice listener was off — starting it so a double-clap can wake Helios")
+        try:
+            conf.update_settings({"voice.enabled": True})
+        except Exception:
+            pass
+        _launch_voice()          # dormant is already True -> HELIOS_VOICE_AWAKE=0
+        if hub is not None:
+            hub.publish("voice", {"state": "idle"})
 
 
 def _summon() -> None:
@@ -273,6 +285,43 @@ def _minimize_dashboard() -> None:
         except Exception as e:  # pragma: no cover
             conf.log("app", f"minimize error: {e}")
     _dispatch(_impl)
+
+
+def _toggle_maximize_dashboard() -> bool:
+    """Maximize / restore the frameless dashboard (the custom title bar's □ button, or a
+    double-click on the bar). A borderless WinForms window maximizes over the taskbar, so the
+    maximized bounds are first pinned to the monitor's working area. Returns the new state."""
+    want = not _state.get("maximized", False)
+    _state["maximized"] = want
+
+    def _impl():
+        win = _state["window"]
+        if win is None:
+            return
+        try:
+            from System import Func, Type                    # pythonnet (pywebview's backend)
+            from System.Drawing import Rectangle
+            import System.Windows.Forms as WinForms
+            from webview.platforms.winforms import BrowserView
+            form = BrowserView.instances.get(win.uid)
+
+            def _apply():
+                if want:
+                    scr = WinForms.Screen.FromHandle(form.Handle)
+                    wa, b = scr.WorkingArea, scr.Bounds      # bounds are relative to the monitor
+                    form.MaximizedBounds = Rectangle(wa.X - b.X, wa.Y - b.Y, wa.Width, wa.Height)
+                    form.WindowState = WinForms.FormWindowState.Maximized
+                else:
+                    form.WindowState = WinForms.FormWindowState.Normal
+            form.Invoke(Func[Type](_apply))
+        except Exception as e:  # pragma: no cover — fall back to pywebview's own calls
+            conf.log("app", f"maximize (work area) failed, using plain maximize: {e}")
+            try:
+                win.maximize() if want else win.restore()
+            except Exception as e2:
+                conf.log("app", f"maximize error: {e2}")
+    _dispatch(_impl)
+    return want
 
 
 def _resize_dashboard(w: int, h: int, fixx: str = "left", fixy: str = "top") -> None:
@@ -428,7 +477,8 @@ def main() -> None:
             close=lambda: _show_dashboard(False),
             voice_toggle=_make_voice_toggle(hub),
             sleep=_sleep,
-            resize=_resize_dashboard)
+            resize=_resize_dashboard,
+            maximize=_toggle_maximize_dashboard)
     except OSError as e:
         conf.log("app", f"could not bind {conf.BASE_URL} ({e}); is Helios already running?")
         notify.toast("Helios failed to start", f"Port {conf.PORT} is in use. {e}")
@@ -666,6 +716,14 @@ def _voice_running() -> bool:
     return _pid_is_live(pid, ctime)
 
 
+def _voice_alive() -> bool:
+    """Running, or just launched and still starting up (its PID file comes a moment later)."""
+    if _voice_running():
+        return True
+    vp = _state.get("voice_proc")
+    return vp is not None and vp.poll() is None
+
+
 def _kill_stray_voice() -> None:
     """Kill an orphaned voice daemon from a previous run before spawning a fresh one — only when
     the recorded PID verifiably is still ours (creation-time match), else just clear the stale file.
@@ -733,10 +791,19 @@ def _launch_voice() -> bool:
 
 
 def _make_voice_toggle(hub):
-    """Build the /voice/toggle callback: flip the daemon on/off at runtime (dashboard mic button).
+    """Build the /voice/toggle callback: turn the daemon on/off at runtime (dashboard mic button).
+    `want` is what the button asked for (True = on); the call is idempotent, so a button showing a
+    stale state can't switch the listener off when the user meant "on". want=None flips.
     Returns the resulting running state so the UI can update immediately."""
-    def toggle() -> bool:
-        if _voice_running() or _state.get("voice_proc") is not None:
+    def toggle(want: bool | None = None) -> bool:
+        alive = _voice_alive()
+        if want is None:
+            want = not alive
+        if want and alive:
+            return True
+        if not want and not alive:
+            return False
+        if not want:
             _kill_voice()
             try:
                 conf.update_settings({"voice.enabled": False})  # button is the source of truth

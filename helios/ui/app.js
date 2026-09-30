@@ -233,8 +233,8 @@ function setMic(on, live) {
   micbtn.classList.toggle("on", !!on);
   micbtn.classList.toggle("live", !!live);
   micbtn.setAttribute("aria-pressed", on ? "true" : "false");
-  micbtn.title = on ? "Voice on — listening for “hey Helios” (click to turn off)"
-                    : "Voice off (click to turn on)";
+  micbtn.title = on ? "Voice on — listening for claps / “hey Helios” (click to turn off; Sleep turns it back on)"
+                    : "Voice off — Helios can't hear you or your claps (click to turn on)";
 }
 
 // --- YOLO (all-permissions) toggle --------------------------------------------------------
@@ -557,7 +557,9 @@ micbtn.addEventListener("click", async () => {
   const turningOn = !micbtn.classList.contains("on");
   setMic(turningOn, false);
   try {
-    const r = await (await jfetch("/voice/toggle", { method: "POST" })).json();
+    const r = await (await jfetch("/voice/toggle", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on: turningOn }) })).json();
     setMic(!!r.running, false);
     if (!r.running) hideVoiceHud(0);
   } catch { setMic(!turningOn, false); }
@@ -630,6 +632,25 @@ document.querySelectorAll("#empty .ex").forEach(b => b.addEventListener("click",
 // close -> hide back to the orb. The native app drives the window via these endpoints.
 g("minbtn").addEventListener("click", () => jfetch("/window/minimize", { method: "POST" }));
 g("closebtn").addEventListener("click", () => jfetch("/window/close", { method: "POST" }));
+// Maximize / restore: the □ button, or a double-click on the title bar itself (not its buttons).
+// While maximized the edge resize zones are hidden and the button shows the "restore" icon.
+function setMaximized(on) {
+  document.body.classList.toggle("maximized", !!on);
+  const b = g("maxbtn");
+  b.title = on ? "Restore" : "Maximize";
+  b.setAttribute("aria-label", b.title);
+}
+function toggleMaximize() {
+  jfetch("/window/maximize", { method: "POST" })
+    .then(r => (r && typeof r.json === "function") ? r.json() : r)
+    .then(d => { if (d && typeof d.maximized === "boolean") setMaximized(d.maximized); })
+    .catch(() => {});
+}
+g("maxbtn").addEventListener("click", toggleMaximize);
+g("bar").addEventListener("dblclick", (e) => {
+  if (e.target.closest("button, input, select, textarea, a, .powermenu")) return;
+  toggleMaximize();
+});
 
 // --- power menu (top-left): Sleep / Shut down ---
 const powerbtn = g("powerbtn"), powermenu = g("powermenu");

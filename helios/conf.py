@@ -175,6 +175,13 @@ def vault_path() -> Path:
     return Path(p) if p else (Path.home() / "Documents" / "Obsidian Vaults" / "LocalAI")
 
 
+def projects_dir() -> Path:
+    """Folder of project manifests (one <name>.yaml per project) — [paths].projects,
+    default data/projects. These are user-authored; the brain's gate hard-denies writing them."""
+    p = _section("paths").get("projects")
+    return Path(p) if p else (DATA_DIR / "projects")
+
+
 def workspace_path() -> Path:
     """Working directory the claude -p process runs in (cwd for each brain turn).
     Defaults to the user's home directory."""

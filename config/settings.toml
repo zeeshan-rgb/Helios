@@ -6,6 +6,9 @@
 vault = "D:/Helios/data/memory"   # moved off C: (2026-09-29); the old vault was copied, not deleted
 # Default working directory for the brain's file/shell actions. Blank = your home directory.
 workspace = ""
+# Project manifests (one <name>.yaml per project; `helios projects add <folder>`). These are the
+# ONLY folders Helios inspects/checks on its own. Blank = data/projects.
+projects = "D:/Helios/data/projects"
 
 [claude]
 # Fallback model if the router is disabled.
@@ -117,11 +120,14 @@ open_on_wake = ["spotify"]     # apps/URIs to launch on wake (the dashboard alwa
                                # "spotify" is only opened if Spotify is actually connected (the
                                # one-time OAuth via setup / tools/spotify_auth.py) — otherwise it's
                                # skipped, so a fresh install doesn't pop Spotify open on every wake.
-clap_sensitivity = 0.1         # min absolute clap loudness (0.06 very sensitive .. 0.35 needs a
-                               # loud clap). Detection also adapts to ambient level, so this is
-                               # mostly the floor in a quiet room. A foam windscreen makes claps
-                               # quieter — lower this if claps don't register with it on; raise it
-                               # if typing/noise false-triggers a wake.
+clap_sensitivity = 0.15        # min loudness of EACH clap (0.06 very sensitive .. 0.35 needs a
+                               # loud clap); one of the two must reach ~1.7x this. A clap must
+                               # also be sharp (gone within 0.15s), so speech/music/TV don't count.
+                               # Raise it if background noise still wakes Helios; lower it if your
+                               # claps don't register (a foam windscreen makes claps quieter).
+                               # (was 0.1 — too sensitive: background bumps woke Helios, 2026-09-30)
+clap_max_gap = 1.0             # max seconds between the two claps (was 1.5 — too easy for two
+                               # random noises to pair up)
 # Spotify: by DEFAULT just open the app (no auto-play). Set spotify_play to a playlist/album/track
 # (a Spotify URI like "spotify:playlist:XXXX" or an open.spotify.com link) to auto-start it on wake.
 # the user's personal "play KB on wake" lives in config/secrets.toml [startup] (gitignored), so the
@@ -220,3 +226,35 @@ allow = ["mcp__computer__screenshot", "mcp__computer__screen_size", "mcp__comput
 # it's gated to 'ask' (and hard-denied for private/loopback targets) in permissions.py.
 # Always ask for these even if a broader rule would allow (substring match on tool name).
 always_ask = []
+
+
+[night_mode]
+# Overnight maintenance: sync project state, run the projects' configured health checks, learn
+# from the day's conversations, review learned rules/skills, summarize projects, and write a
+# report to <vault>\Night Reports\. Needs Helios running (the PC awake) during the window; a
+# missed night is reported with the reason. Never modifies Helios's own code.
+enabled = true
+start = "01:00"   # window start
+end = "05:00"     # hard end: no task starts after this
+
+[night_mode.schedule]
+# task = earliest start time. Delete a line to turn that task off.
+sync_projects = "01:00"
+run_checks = "01:15"
+research = "02:00"
+analyze_conversations = "03:00"
+extract_memories = "03:30"
+update_rules_skills = "03:45"
+project_summaries = "04:00"
+
+[research]
+# Night Mode researches these (plus each project manifest's research_topics), a few per night,
+# least-recently researched first. Findings go to <vault>\Research Library\ — kept apart from
+# memory. Runs in a locked-down mode: web search + reading public pages only.
+enabled = true
+topics = ["MCP", "computer use", "AI agents", "Gemini", "Antigravity", "Next.js", "React", "Three.js", "Polarion"]
+include_project_topics = true
+max_topics_per_run = 5
+max_findings_per_topic = 4
+recency_days = 14
+timeout = 480   # seconds per topic (a topic usually takes 2-4 min)

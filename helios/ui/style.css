@@ -180,6 +180,11 @@ button:active { transform: translateY(.5px); }
 }
 .wbtn svg { width: 16px; height: 16px; }
 .wbtn:hover { background: var(--panel-2); color: var(--text); border-color: var(--line); }
+/* Maximize button shows □ normally and the overlapping-squares "restore" icon when maximized. */
+#maxbtn .ic-restore { display: none; }
+body.maximized #maxbtn .ic-max { display: none; }
+body.maximized #maxbtn .ic-restore { display: block; }
+body.maximized #resizeedges { display: none; }   /* no edge-resizing while maximized */
 .wclose:hover { background: var(--danger-soft); color: #ff9fac; border-color: rgba(224, 85, 107, .4); }
 
 /* --------------------------------------------------------------- mic button */

@@ -133,6 +133,14 @@ class Scheduler:
         # 3c) due scheduled workflows -> WorkflowManager (advances next_run + runs in background)
         self.workflows.tick(now)
 
+        # 3d) Night Mode: heartbeat (sleep detection) + start tonight's run in its window /
+        # record a missed night. Runs on its own thread; never blocks this tick.
+        try:
+            from . import night_mode
+            night_mode.tick(now, emit=self.emit, stop=self._stop)
+        except Exception as e:  # pragma: no cover
+            conf.log("scheduler", f"night mode tick error: {e}")
+
         # 4) proactive observers (~every 5 min)
         if datetime.now() >= self._next_observe:
             self._next_observe = datetime.now() + timedelta(minutes=5)

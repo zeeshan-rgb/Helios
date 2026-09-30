@@ -81,9 +81,12 @@ class VoiceDaemon:
         s = conf.startup_cfg()
         self.wake_gesture = s.get("wake_gesture", "none")
         self.clap_enabled = self.wake_gesture == "double_clap"
-        self.clap = ClapDetector(sensitivity=float(s.get("clap_sensitivity", 0.45)))
+        self.clap = ClapDetector(sensitivity=float(s.get("clap_sensitivity", 0.15)),
+                                 max_gap=float(s.get("clap_max_gap", 1.0)))
         # Boot dormant (mic listens for the gesture only) — unless the app launched us while awake.
-        self.dormant = bool(s.get("hidden", False)) and os.environ.get("HELIOS_VOICE_AWAKE") != "1"
+        # HELIOS_VOICE_AWAKE=0 means the app is asleep right now (e.g. Sleep restarted the voice
+        # listener so a double-clap can wake it): boot dormant even if [startup].hidden is off.
+        self.dormant = self._boot_dormant(s.get("hidden", False), os.environ.get("HELIOS_VOICE_AWAKE"))
 
         self.mic = Microphone()
         self.wake = WakeWord(c.get("wake_word", "hey_jarvis"),
@@ -194,7 +197,7 @@ class VoiceDaemon:
                 conf.log("voice", "woke from dormant (control)")
             elif action == "sleep" and not self.dormant:
                 self.dormant = True
-                self.clap.reset()
+                self.clap.reset(grace=1.0)   # the click/tap that put Helios to sleep can't wake it
                 self.tts.stop()
                 self._turn_complete.set()  # unblock any wait so the loop returns to dormant
                 conf.log("voice", "went dormant (control)")
@@ -212,9 +215,15 @@ class VoiceDaemon:
         frames: list[np.ndarray] = []
         t0 = time.monotonic()
         last_partial = 0.0
+        asleep_at_start = self.dormant
         self._vu_state = state   # VU loop now pulses the orb/HUD from the live mic level
         try:
             while not self._stop.is_set():
+                if self.dormant and not asleep_at_start:
+                    # Put to sleep mid-listen: abandon this capture at once so the loop goes
+                    # back to listening for the double-clap (it used to keep recording and
+                    # miss every clap until the capture timed out).
+                    return None
                 frame = self.mic.read(0.3)
                 now = time.monotonic()
                 if frame is None:
@@ -587,6 +596,12 @@ class VoiceDaemon:
         except Exception as e:  # pragma: no cover
             conf.log("voice", f"dictation typing failed: {e}")
 
+    @staticmethod
+    def _boot_dormant(hidden, awake_env: str | None) -> bool:
+        """Start asleep? "0" = the app is asleep now (always dormant), "1" = the app is awake
+        (never), unset = follow [startup].hidden."""
+        return awake_env == "0" or (bool(hidden) and awake_env != "1")
+
     def _clap_is_wake(self) -> bool:
         """With no usable wake-word model, the double-clap stands in for "hey Helios" (wake AND
         start listening). Once the model exists, a clap only summons the dashboard again."""
@@ -625,6 +640,8 @@ class VoiceDaemon:
             if self.dormant:
                 # Hidden/dormant: the mic listens for the wake GESTURE (double-clap) OR the wake
                 # WORD ("hey Helios") — either wakes Helios (app reveals the orb + dashboard + apps).
+                # A hot-mic follow-up from before the sleep must not fire after a later wake.
+                in_followup = barge_capture = False
                 frame = self.mic.read(0.3)
                 if frame is None or self._speaking.is_set():
                     continue
@@ -686,6 +703,10 @@ class VoiceDaemon:
             audio = self._capture(start_timeout=start_timeout, max_sec=self.max_utterance)
             was_followup, in_followup = in_followup, False
             this_barge, barge_capture = barge_capture, False
+            if self.dormant:
+                # Slept during the capture: drop whatever was heard and wait for the clap again.
+                conf.log("voice", "listen cancelled — Helios was put to sleep")
+                continue
             if audio is None:
                 if explicit:
                     conf.log("voice", "no speech heard — back to idle")

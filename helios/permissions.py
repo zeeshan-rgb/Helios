@@ -107,6 +107,24 @@ def is_claude_dir(path: str) -> bool:
     return "/.claude/" in p or p.endswith("/.claude")
 
 
+def is_projects_config(path_or_command: str) -> bool:
+    """True if a path (or a shell command) touches the project-manifest folder. Manifests decide
+    which commands Helios runs as health checks, so only the user edits them (hard-deny)."""
+    s = (path_or_command or "").replace("\\", "/").lower()
+    if not s:
+        return False
+    try:
+        d = str(conf.projects_dir()).replace("\\", "/").rstrip("/").lower()
+        dirs = {d}
+        try:
+            dirs.add(str(conf.projects_dir().resolve()).replace("\\", "/").rstrip("/").lower())
+        except Exception:
+            pass
+    except Exception:
+        return False
+    return any(x and (x in s) for x in dirs)
+
+
 def is_internal_url(url: str) -> bool:
     """True if a URL points at loopback / private / link-local / unspecified address space
     (SSRF target). Used by the PreToolUse hook to hard-deny internal WebFetch."""
