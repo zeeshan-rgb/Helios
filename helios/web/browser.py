@@ -249,6 +249,7 @@ class Browser:
         return self._new_tab()
 
     def _new_tab(self):
+        self._ensure()                       # open(new_tab=True) can be the very first call
         if len(self.tabs) >= self.max_tabs:
             oldest = next(iter(self.tabs))
             try:

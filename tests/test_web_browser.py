@@ -419,3 +419,9 @@ def test_live_headless_edge():
             b.open("http://127.0.0.1:1/")
     finally:
         b.close()
+
+
+def test_new_tab_as_the_very_first_call(br):
+    # regression: open(new_tab=True) before anything else crashed ('NoneType' has no new_page)
+    info = br.open("https://example.com/first", new_tab=True)
+    assert info["tab"] == "t1" and br.running

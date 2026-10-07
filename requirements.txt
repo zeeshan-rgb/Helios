@@ -70,6 +70,8 @@ kokoro-onnx>=0.5.0       # Kokoro v1.0 TTS (bundles espeak-ng via espeakng-loade
 # Drives the INSTALLED Edge/Chrome headless (channel="msedge"/"chrome"), so no
 # `playwright install` browser download is needed.
 playwright==1.63.0
+# Clean article text + metadata (helios/web/extractor.py); pulls lxml, htmldate, courlan, justext
+trafilatura==2.3.1
 # --- Screen intelligence (helios/computer/) ---
 # UI Automation reading uses `uiautomation` (above). OCR fallback = Windows' built-in OCR engine
 # (offline, no model download, ~0.1-1 s per window). Optional: screen_context says so if missing.
