@@ -46,6 +46,8 @@ class ScreenContext:
     text: str = ""            # visible document / static text (bounded)
     selection: str = ""
     dialogs: list[str] = field(default_factory=list)          # message boxes / errors
+    ocr_lines: list[Element] = field(default_factory=list)    # text read from pixels (fallback)
+    ocr_text: str = ""
     truncated: bool = False
     notes: list[str] = field(default_factory=list)
     elapsed_ms: int = 0

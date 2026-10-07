@@ -17,6 +17,8 @@ Two halves, deliberately separate:
    menu paths.
 2. **App shortcut / menu / deep link.** `hotkey`, `invoke_menu`, `launch_app("ms-settings:…")`.
 3. **OCR or screenshot reading.** For surfaces with no controls: canvas, images, remote desktop.
+   `screen_context` adds OCR on its own when UI Automation sees little text, and
+   `find_ui_element` falls back to OCR text. See `HELIOS_SCREEN_INTELLIGENCE.md`.
 4. **Pixel coordinates.** Last resort.
 
 After every action: `verify_state`, or one fresh read, to confirm the *expected* change.
