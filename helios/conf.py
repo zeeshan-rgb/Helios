@@ -81,6 +81,35 @@ def load() -> dict:
 SETTINGS = load()
 
 
+def set_secret(section: str, key: str, value: str | None) -> None:
+    """Set (or with None, remove) `key` in config/secrets.toml [section], keeping every other
+    line as it was. Only the CLI calls this (token prompts / sign-in) — never the AI, which can't
+    touch secrets.toml at all (protected path). The value is written as a TOML string."""
+    import json as _json
+    if not re.fullmatch(r"[A-Za-z0-9_]+", section) or not re.fullmatch(r"[A-Za-z0-9_]+", key):
+        raise ValueError("bad secrets section/key name")
+    path = CONFIG_DIR / "secrets.toml"
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    new = None if value is None else f"{key} = {_json.dumps(str(value))}"
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == f"[{section}]"), None)
+    if start is None:
+        if new is None:
+            return
+        lines += ([""] if lines and lines[-1].strip() else []) + [f"[{section}]", new]
+    else:
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].strip().startswith("[")),
+                   len(lines))
+        hit = next((i for i in range(start + 1, end) if re.match(rf"\s*{key}\s*=", lines[i])), None)
+        if hit is None and new is not None:
+            lines.insert(start + 1, new)
+        elif hit is not None:
+            if new is None:
+                del lines[hit]
+            else:
+                lines[hit] = new
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _section(name: str) -> dict:
     """Return the named [section] table from SETTINGS, or {} if missing/not a table."""
     v = SETTINGS.get(name)

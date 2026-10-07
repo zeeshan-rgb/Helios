@@ -65,28 +65,37 @@ class Transcriber:
 
         gated=False skips the junk/confidence filter (used for dictation, where the user is
         deliberately speaking and we want the raw text even if short)."""
+        g, raw = self.transcribe_both(audio, log_rejects=gated)
+        return g if gated else raw
+
+    def transcribe_both(self, audio: np.ndarray, *, log_rejects: bool = True) -> tuple[str, str]:
+        """One engine run -> (gated text, raw text). The RealtimeSTT capture uses this so a
+        command (gated) and a dictation / spoken yes-no (raw) never need a second pass."""
         try:
             audio = np.asarray(audio, dtype="float32").reshape(-1)
             if audio.size < 1600:  # < 0.1s — nothing to hear
-                return ""
+                return "", ""
             segments = self._transcribe_core(audio)
-            parts, kept, dropped = [], False, []
+            parts, every, kept, dropped = [], [], False, []
             for s in segments:
+                every.append(s.text)
                 nsp, lp = getattr(s, "no_speech_prob", 0.0), getattr(s, "avg_logprob", 0.0)
-                if gated and (nsp > _NO_SPEECH_MAX or lp < _LOGPROB_MIN):
+                if nsp > _NO_SPEECH_MAX or lp < _LOGPROB_MIN:
                     dropped.append(f"{s.text.strip()!r} (no_speech {nsp:.2f}, logprob {lp:.2f})")
                     continue
                 parts.append(s.text)
                 kept = True
+            raw = re.sub(r"\s+", " ", " ".join(every)).strip()
             text = re.sub(r"\s+", " ", " ".join(parts)).strip()
-            if gated and (not kept or text.lower().strip(" .,!?") in _JUNK):
+            if not kept or text.lower().strip(" .,!?") in _JUNK:
                 # Say what was thrown away, so "not understood" can be tuned instead of guessed at.
-                conf.log("voice", "stt rejected: " + ("; ".join(dropped) if dropped else repr(text)))
-                return ""
-            return text
+                if log_rejects:
+                    conf.log("voice", "stt rejected: " + ("; ".join(dropped) if dropped else repr(text)))
+                return "", raw
+            return text, raw
         except Exception as e:  # pragma: no cover
             conf.log("voice", f"stt error: {e}")
-            return ""
+            return "", ""
 
 
 # ---- dictation helpers ----------------------------------------------------------------

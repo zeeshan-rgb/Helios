@@ -64,6 +64,26 @@ def check_stt(cfg: dict) -> tuple[str, str]:
         return "fail", f"faster-whisper failed: {e}"
 
 
+def check_capture(cfg: dict) -> tuple[str, str]:
+    engine = str(cfg.get("capture_engine", "builtin")).strip().lower()
+    if engine != "realtimestt":
+        return "ok", "built-in (Silero endpointing)"
+    from .realtime_stt import available
+    ok, why = available()
+    if not ok:
+        return "warn", f"realtimestt selected but {why} — the built-in capture is used instead"
+    try:
+        from .realtime_stt import PartialExecutor
+        t0 = time.time()
+        p = PartialExecutor(str(cfg.get("rt_partial_model", "tiny.en")),
+                            int(cfg.get("rt_partial_threads", 2)))
+        p.warmup()
+        return "ok", (f"RealtimeSTT — early transcription + live text "
+                      f"({p.model_name} loaded in {time.time() - t0:.1f}s)")
+    except Exception as e:
+        return "warn", f"RealtimeSTT live-text model failed ({e}) — built-in capture used"
+
+
 def check_wake(cfg: dict) -> tuple[str, str]:
     from .wake import WakeWord
     w = WakeWord(cfg.get("wake_word", "hey_jarvis"), float(cfg.get("wake_threshold", 0.5)))
@@ -107,6 +127,7 @@ def run_checks() -> list[tuple[str, str, str]]:
     results.append(("audio devices", st, f"{a}; {b}".strip("; ")))
     results.append(("text-to-speech", *check_tts(cfg)))
     results.append(("speech-to-text", *check_stt(cfg)))
+    results.append(("speech capture", *check_capture(cfg)))
     results.append(("wake word", *check_wake(cfg)))
     results.append(("voice lock", *check_voice_lock(cfg)))
     s = conf.startup_cfg()

@@ -59,6 +59,13 @@ kokoro-onnx>=0.5.0       # Kokoro v1.0 TTS (bundles espeak-ng via espeakng-loade
 #   pip install webrtcvad-wheels librosa
 #   pip install resemblyzer --no-deps
 # (speaker_verify.py degrades gracefully — the feature just stays off — when it isn't installed.)
+# OPTIONAL — RealtimeSTT capture ([voice].capture_engine = "realtimestt"): faster endpointing, early
+# transcription, live text. Its own pins (scipy, soundfile, websockets, PyAudio, torchaudio) would
+# replace Helios's packages, and Helios feeds it audio itself, so install WITHOUT deps (needs the
+# torch + webrtcvad-wheels from the voice-lock step above):
+#   pip install --no-deps RealtimeSTT==1.1.2 "silero-vad>=6.2.1"
+#   pip install halo==0.0.31
+# (helios/voice/realtime_stt.py falls back to the built-in capture when it isn't installed.)
 # Wake/VAD/feature models download once to the openwakeword package dir via
 #   python -c "from openwakeword.utils import download_models; download_models()"
 # Kokoro model assets live in data/voices/ (kokoro-v1.0.onnx + voices-v1.0.bin, gitignored).

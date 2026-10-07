@@ -534,6 +534,124 @@ def attention(p: dict) -> list[str]:
     return reasons
 
 
+# ------------------------------------------------------------------------------ discover (CLI only)
+
+_DISCOVER_SKIP = _SCAN_SKIP | {"appdata", "windows", "program files", "program files (x86)",
+                               "programdata", "$recycle.bin", "system volume information",
+                               "onedrivetemp", "temp", "tmp", "cache", "caches", "logs",
+                               "site-packages", ".vscode", ".idea", "packages", "bin", "obj",
+                               # tool caches / SDKs / raw database stores / licences — not "work"
+                               "npm-cache", "maven-repo", ".m2", "gradle", "android", "sdk",
+                               "nodejs", "postgres-data", "pgdata", "pg_data", "license",
+                               "licenses", "uploaddir"}
+_MARKERS = (".git", "package.json", "pyproject.toml", "requirements.txt", "build.gradle",
+            "build.gradle.kts", "pom.xml", "Cargo.toml", "go.mod", ".project", "Makefile")
+
+
+def default_discovery_roots() -> list[Path]:
+    home = Path.home()
+    roots = [home / "Desktop", home / "Documents", home / "Downloads"]
+    for drive in ("D:\\", "E:\\"):
+        if Path(drive).exists():
+            roots.append(Path(drive))
+    return [r for r in roots if r.exists()]
+
+
+def discover_recent(days: int = 60, roots: list[Path] | None = None, *, max_depth: int = 3,
+                    max_entries: int = 250_000, time_budget: float = 90.0) -> list[dict]:
+    """Folders you've worked in lately: a candidate is a folder (<= max_depth below a root)
+    holding files modified in the last `days` days — rolled up to the nearest project root
+    (a folder with .git / package.json / pyproject ...). Skips system, app-data, dependency and
+    build folders, protected locations and Helios's own data. Read-only: lists, never adds."""
+    from . import protected
+    cutoff = time.time() - days * 86400
+    started = time.monotonic()
+    known = {_norm(p["path"]) for p in load_all()[0]}
+    helios_data = {_norm(conf.DATA_DIR), _norm("D:/Helios")}
+    found: dict[str, dict] = {}
+    seen = 0
+    for root in (roots or default_discovery_roots()):
+        base_depth = len(root.parts)
+        # roll plain folders up to their top-level working folder: one level under a home folder
+        # (Desktop\Chronos), two on a data drive (E:\data\workspace)
+        rollup = 2 if root.parent == root else 1
+        for cur, dirs, files in os.walk(root):
+            if time.monotonic() - started > time_budget or seen > max_entries:
+                break
+            cp = Path(cur)
+            depth = len(cp.parts) - base_depth
+            n = _norm(cp)
+            dirs[:] = [d for d in dirs
+                       if d.lower() not in _DISCOVER_SKIP and not d.startswith(".")
+                       and not any(_norm(cp / d).startswith(h) for h in helios_data)
+                       and depth < max_depth + 2]
+            prob = path_problem(str(cp)) if depth > 0 else None
+            if protected.check(str(cp) + "/") or (prob and "too broad" not in prob):
+                dirs[:] = []                 # credential stores / system folders: never walked
+                continue
+            recent = 0
+            latest = 0.0
+            for f in files:
+                seen += 1
+                try:
+                    m = os.path.getmtime(os.path.join(cur, f))
+                except OSError:
+                    continue
+                if m >= cutoff:
+                    recent += 1
+                    latest = max(latest, m)
+            if not recent or depth == 0:
+                continue
+            # the project root: the nearest ancestor (or self, within max_depth) with a project
+            # marker; otherwise the top-level working folder
+            proj, marker = None, False
+            for anc in [cp, *cp.parents]:
+                d = len(anc.parts) - base_depth
+                if d < 1:
+                    break
+                if d <= max_depth and any((anc / mk).exists() for mk in _MARKERS):
+                    proj, marker = anc, True
+                    break
+            if proj is None:
+                proj = cp
+                while len(proj.parts) - base_depth > rollup:
+                    proj = proj.parent
+            key = _norm(proj)
+            e = found.setdefault(key, {"path": str(proj), "recent_files": 0, "latest": 0.0,
+                                       "git": (proj / ".git").exists(), "known": key in known,
+                                       "marker": marker})
+            e["recent_files"] += recent
+            e["latest"] = max(e["latest"], latest)
+    # a folder inside another listed folder folds into it; git repos and registered projects
+    # stay separate (Docs\trunk -> Docs, App\module -> App)
+    for key in sorted(found, key=len, reverse=True):
+        e = found[key]
+        if e["git"] or e["known"]:
+            continue
+        parent = next((k for k in found if k != key and key.startswith(k + "/")), None)
+        if parent:
+            found[parent]["recent_files"] += e["recent_files"]
+            found[parent]["latest"] = max(found[parent]["latest"], e["latest"])
+            del found[key]
+    out = sorted(found.values(), key=lambda e: -e["latest"])
+    for e in out:
+        e["technology"] = detect(e["path"])["technology"]
+        e["latest_iso"] = datetime.fromtimestamp(e["latest"]).isoformat(timespec="minutes")
+    return out
+
+
+def format_discovered(items: list[dict]) -> str:
+    if not items:
+        return "No recently active folders found."
+    lines = []
+    for i, e in enumerate(items, 1):
+        tech = f" [{', '.join(e['technology'])}]" if e["technology"] else ""
+        tags = (" (git)" if e["git"] else "") + (" — already a project" if e["known"] else "")
+        lines.append(f"{i:>2}. {e['path']}{tech}{tags}\n      {e['recent_files']} file(s) changed, "
+                     f"last {e['latest_iso'].replace('T', ' ')}")
+    return "\n".join(lines)
+
+
 # ------------------------------------------------------------------------------ add (CLI only)
 
 def detect(path: str) -> dict:

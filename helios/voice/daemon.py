@@ -99,6 +99,17 @@ class VoiceDaemon:
         self.vad = Endpointer(silence_ms=self.silence_ms)
         self.stt = build_transcriber(c)   # faster-whisper (default) | openai | groq
         self.tts = build_speaker(c)        # Kokoro (default) | openai | groq
+        # Capture engine: "builtin" (voice/vad.py) or "realtimestt" (KoljaB/RealtimeSTT — faster
+        # endpointing, early transcription, live text). Falls back to builtin if it can't start.
+        self.rt = None
+        self._rt_last = None               # (audio, gated, raw) of the last RealtimeSTT capture
+        if str(c.get("capture_engine", "builtin")).strip().lower() == "realtimestt":
+            from helios.voice import realtime_stt
+            ok, why = realtime_stt.available()
+            if ok:
+                self.rt = realtime_stt.RealtimeCapture(self.stt, c, self._stt_lock)
+            else:
+                conf.log("voice", f"capture_engine=realtimestt but {why} — using built-in capture")
         self.bridge = AppBridge()
         self.ambient = AmbientMonitor(on_trigger=self._on_ambient_trigger)
 
@@ -235,6 +246,10 @@ class VoiceDaemon:
         live partial transcriptions to the dashboard HUD (post_voice_state(state, partial=...)) so
         the user sees what Helios is hearing in real time; `state` is the UI state to tag them with
         ("listening" for a command, "dictation" for dictation)."""
+        self._rt_last = None
+        rt = getattr(self, "rt", None)
+        if rt is not None and rt.ready:
+            return VoiceDaemon._capture_rt(self, start_timeout, max_sec, state)
         self.vad.reset()
         self.mic.flush()
         frames: list[np.ndarray] = []
@@ -293,6 +308,72 @@ class VoiceDaemon:
             return np.concatenate(frames).astype("float32") / _PCM_SCALE
         finally:
             self._vu_state = None
+
+    def _capture_rt(self, start_timeout: float, max_sec: float, state: str):
+        """_capture through RealtimeSTT: same contract (float32 audio or None), same sleep / mute /
+        announcement / timeout behaviour. The daemon keeps reading the one mic and feeds frames in;
+        RealtimeSTT endpoints, streams live text and starts the final transcription early. The text
+        is kept in self._rt_last so _transcribe() doesn't run the model a second time."""
+        rt = self.rt
+        self.mic.flush()
+        on_partial = None
+        if self.live_transcript:
+            def on_partial(text):
+                if not self.dormant:
+                    self.bridge.post_voice_state(state, partial=text)
+        rt.begin(on_partial)
+        t0 = time.monotonic()
+        asleep_at_start = self.dormant or self.muted
+        self._vu_state = state
+        try:
+            while not self._stop.is_set():
+                if (self.dormant or self.muted) and not asleep_at_start:
+                    rt.cancel()
+                    return None
+                if not self._announce_q.empty() and not rt.started and not asleep_at_start:
+                    rt.cancel()
+                    return None
+                if rt.done:
+                    break
+                frame = self.mic.read(0.1)
+                now = time.monotonic()
+                if frame is None:
+                    self._mic_level *= 0.5
+                else:
+                    fa = frame.astype("float32") / _PCM_SCALE
+                    self._mic_level = float(np.sqrt(np.mean(fa * fa)))
+                    rt.feed(frame)
+                if not rt.started and now - t0 > start_timeout:
+                    rt.cancel()
+                    return None
+                if now - t0 > max_sec:
+                    rt.stop()                     # too long: end it here, still transcribe
+                    break
+            if not rt.wait(20.0):
+                conf.log("voice", "RealtimeSTT transcription timed out")
+                rt.cancel()
+                return None
+            got = rt.result()
+            if not got:
+                return None
+            self._rt_last = got
+            return got[0]
+        except Exception as e:  # never let the optional engine take voice down
+            conf.log("voice", f"RealtimeSTT capture failed ({e}) — switching to built-in capture")
+            self.rt = None
+            threading.Thread(target=rt.close, daemon=True).start()
+            return None
+        finally:
+            self._vu_state = None
+
+    def _transcribe(self, audio, *, gated: bool = True) -> str:
+        """Text for a captured clip: reuse RealtimeSTT's result when it's that capture's audio,
+        otherwise run the transcriber (built-in capture)."""
+        last = getattr(self, "_rt_last", None)
+        if last is not None and last[0] is audio:
+            return last[1] if gated else last[2]
+        with self._stt_lock:               # wait for any in-flight live partial to finish
+            return self.stt.transcribe(audio, gated=gated)
 
     def _spawn_partial(self, frames, state):
         """Transcribe the utterance-so-far on a background thread and push it to the HUD as a live
@@ -417,8 +498,7 @@ class VoiceDaemon:
             answer = ""
             # Only the owner can approve by voice: a stranger's "yes" counts as no answer (-> deny).
             if audio is not None and self._owner_voice(audio, "permission answer"):
-                with self._stt_lock:
-                    answer = self.stt.transcribe(audio, gated=False) or ""
+                answer = self._transcribe(audio, gated=False) or ""
             verdict = self._classify_answer(answer)
             conf.log("voice", f"permission answer {answer!r} -> {verdict} (attempt {attempt})")
             if verdict in ("allow", "deny"):
@@ -622,8 +702,7 @@ class VoiceDaemon:
         if audio is None:
             self._set_state("idle")
             return
-        with self._stt_lock:                   # wait for any in-flight live partial to finish
-            raw = self.stt.transcribe(audio, gated=False)
+        raw = self._transcribe(audio, gated=False)
         text = clean_for_dictation(raw)
         if text:
             self._type_text(text + " ")
@@ -801,8 +880,7 @@ class VoiceDaemon:
                 self._set_state("idle")         # someone else (or the TV): ignore silently
                 continue
 
-            with self._stt_lock:               # wait for any in-flight live partial to finish
-                text = self.stt.transcribe(audio)
+            text = self._transcribe(audio)
             if not text:
                 conf.log("voice", f"speech captured ({len(audio) / 16000:.1f}s) but not understood")
                 if explicit and relisten_ok:
@@ -930,6 +1008,11 @@ class VoiceDaemon:
                 w()
             except Exception:
                 pass
+        # RealtimeSTT last: it shares the transcriber warmed above. Until it's ready (or if it
+        # fails) captures use the built-in pipeline.
+        rt = self.rt
+        if rt is not None and not self._stop.is_set() and not rt.load():
+            self.rt = None
 
     def _hotkey_map(self) -> dict:
         """Global voice hotkeys: dictation into the focused field, and 'talk to Helios' (the
@@ -965,6 +1048,11 @@ class VoiceDaemon:
             self.tts.close()
         except Exception:
             pass
+        if self.rt is not None:
+            try:
+                self.rt.close()
+            except Exception:
+                pass
         try:
             self.mic.close()
         except Exception:

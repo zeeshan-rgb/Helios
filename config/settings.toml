@@ -158,6 +158,16 @@ enabled = true
 # [openai]/[groq] (api_key). Cloud TTS/STT trade on-device privacy for quality/speed.
 tts_engine = "kokoro"          # kokoro (local) | openai | groq
 stt_engine = "faster-whisper"  # faster-whisper (local) | openai | groq
+# How an utterance is captured. "realtimestt" = KoljaB/RealtimeSTT: WebRTC+Silero endpointing,
+# the final transcription starts DURING your pause (text ready ~0.7s sooner at silence_ms 1500),
+# and live text every ~0.3s from a small tiny.en model (2 CPU threads). It reuses Helios's mic and
+# stt model; if it's missing or fails, Helios falls back to "builtin" on its own.
+capture_engine = "realtimestt"   # realtimestt | builtin
+rt_partial_model = "tiny.en"     # live-text model (tiny.en fastest; base.en more accurate, more CPU)
+rt_partial_threads = 2           # CPU threads for live text (keep low so the PC stays responsive)
+rt_partial_pause = 0.3           # seconds between live-text updates
+# rt_early_ms = 500              # silence (ms) before the final transcription starts; default
+                                 # silence_ms - 1000 (min 450). Lower = faster but more wasted work.
 # Speaker verification: reject false wakes from other people/videos by matching a voiceprint.
 # OPT-IN (default false): needs `pip install resemblyzer` (pulls PyTorch, ~500MB) + a one-time
 # enrollment ("hey Helios, enroll speaker"). Turn on only after enrolling, or it will silently
@@ -190,7 +200,7 @@ followup_sec = 6
 silence_ms = 1500          # trailing silence (ms) that ends an utterance — 1.5s so the user can pause
                            # mid-sentence without Helios cutting in (trade-off: ~0.7s slower to reply)
 max_utterance_sec = 15     # hard cap on a single spoken command
-speak_all = false          # also speak replies to dashboard/Telegram turns (not just voice)
+speak_all = true          # also speak replies to dashboard/Telegram turns (not just voice)
 live_transcript = true     # stream a live transcript to the dashboard HUD while you're speaking
 barge_in = true            # let "hey Helios" interrupt Helios mid-sentence (mic stays open while
                            # speaking). Set false to make speaking uninterruptible if it self-triggers.
@@ -199,7 +209,7 @@ barge_threshold = 0.6      # stricter wake bar WHILE speaking (the open mic hear
 dictation_hotkey = "<ctrl>+<alt>+d"   # push-to-talk: transcribe speech into the focused field
 talk_hotkey = "<ctrl>+<alt>+h"        # talk to Helios: same as saying "hey Helios" (chime, then speak)
 listen_sec = 8             # after a wake word / clap / talk key: seconds to wait for you to start
-muted = false
+muted = true
 
 [server]
 host = "127.0.0.1"
@@ -284,6 +294,26 @@ disabled_tools = []    # e.g. ["open_app", "run_project_tests"]
 # To allow one location on purpose, list its path (or a parent folder) here; it then goes through
 # the normal policy, which still asks you first. Keep this empty unless you really need it.
 allow_protected = []
+
+[polarion]
+# Read-only access to Polarion through its REST API — Helios can search and read work items but has
+# no way to create, change or delete anything. Tokens do NOT go here: run
+#   helios polarion token local     /     helios polarion token server
+# in your own terminal (hidden prompt) — they're saved to config/secrets.toml, which the AI can't read.
+local_url = "http://localhost"     # this PC's Polarion (E:\polarion)
+server_url = ""                    # the company server, e.g. "https://polarion.yourcompany.com"
+
+[gmail]
+# Helios reads your mail and DRAFTS replies to business contacts only; nothing is sent until you
+# approve it (helios gmail send <n>, or saying "send it" and approving). Setup: helios gmail setup
+# <client.json>, then helios gmail login (you sign in in your browser; the token goes to secrets.toml).
+enabled = true
+business_contacts = []       # e.g. ["client@acme.com", "@bigclient.com"] — or: helios gmail business add
+check_every = "every 30m"    # schedule for the reply-draft check (a job: helios jobs)
+query = "in:inbox is:unread newer_than:3d -category:promotions -category:social"
+signature = ""               # e.g. "Best regards,\nZeeshan"
+notify = true                # toast when reply drafts are ready
+timeout = 180
 
 [leads]
 # Nightly, worldwide search for paid work matching your services, with a suggested price range per
