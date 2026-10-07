@@ -305,6 +305,14 @@ idle_close_sec = 180             # close the browser after this long unused
 max_tabs = 6
 page_timeout_sec = 25
 
+[web]
+# Clean page reading (web_extract, research, leads): plain fetch first, the hidden browser only
+# when a page needs JavaScript, Trafilatura for the main text + metadata. Sites that refuse or
+# show a bot check are reported, never worked around. When Helios crawls on its own (Night Mode
+# research/leads) it also obeys robots.txt and spaces out requests to one site.
+cache_hours = 24                 # extracted text (never raw HTML) kept in data/web_cache
+crawl_delay_sec = 2.0            # minimum gap between Helios's own requests to the same site
+
 [polarion]
 # Read-only access to Polarion through its REST API — Helios can search and read work items but has
 # no way to create, change or delete anything. Tokens do NOT go here: run
