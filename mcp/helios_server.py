@@ -670,16 +670,19 @@ def polarion_item(project: str, work_item: str, instance: str = "local") -> str:
 
 
 @mcp.tool()
-def screen_context(window: str = "", detail: str = "summary") -> str:
+def screen_context(window: str = "", detail: str = "summary", ocr: str = "auto") -> str:
     """What's on screen, as text (fast, no screenshot): the active app + window title (with pid and
     window_id for the computer tools), focused control, selection, any dialog/error message, the
     visible controls and visible text, and the other open windows. window = part of a title or
-    app name to read a different window; detail = summary | controls (longer). Use this first for
-    "what's on my screen / what does this say / is there an error"; take a screenshot only when
-    you need to SEE images or layout. Password fields and password managers are never read."""
+    app name to read a different window; detail = summary | controls (longer). ocr = auto (read
+    the screen image only when the app exposes little text — canvases, images, remote desktops) |
+    on | off. Use this first for "what's on my screen / what does this say / is there an error";
+    take a screenshot only when you need to SEE images or layout. Password fields and password
+    managers are never read."""
     from helios.computer import controller
+    mode = ocr if ocr in ("auto", "on", "off") else "auto"
     try:
-        return controller.format_context(controller.screen_context(window, detail=detail), detail)
+        return controller.format_context(controller.screen_context(window, detail=detail, ocr_mode=mode), detail)
     except Exception as e:
         return f"Couldn't read the screen ({e.__class__.__name__}: {e}) — use mcp__computer__get_desktop_state."
 
@@ -688,7 +691,8 @@ def screen_context(window: str = "", detail: str = "summary") -> str:
 def find_ui_element(query: str, window: str = "", role: str = "") -> str:
     """Find a control by its visible name ("Save", "Send", "File name") in the active window (or
     `window`), optionally a role ("button", "edit", "menu item"). Returns the best matches with the
-    exact pid + window_id and the computer-tool call to act on it by element (not by pixels)."""
+    exact pid + window_id and the computer-tool call to act on it by element (not by pixels). If
+    no control matches, it looks for the text on the screen image (OCR) and says so."""
     from helios.computer import controller
     try:
         ctx, matches = controller.find_elements(query, window, role)
@@ -1238,4 +1242,13 @@ if __name__ == "__main__":
                          "mcp/helios_public_server.py (see docs/HELIOS_MCP.md).\n")
         sys.exit(2)
     _load_custom_tools()
+    # Load native DLLs (numpy, Windows OCR) BEFORE the stdio loop starts. On Windows, a DLL that
+    # initialises its own C runtime touches the std handles while loading, and that blocks while
+    # another thread sits in a blocking ReadFile on the stdin pipe — so a first `import numpy`
+    # inside a tool call hangs until the next MCP message (seen with OCR; would hit model_3d too).
+    try:
+        from helios.computer import ocr as _ocr
+        _ocr.preload()
+    except Exception:
+        pass
     mcp.run()

@@ -188,3 +188,131 @@ def test_reader_never_acts():
     src = (_ROOT / "helios" / "computer" / "uia_backend.py").read_text(encoding="utf-8")
     for verb in (".Click(", "SendKeys", ".Invoke(", "SetValue(", ".Select("):
         assert verb not in src
+
+
+# ------------------------------------------------------------------ OCR rung (Phase 2)
+
+from helios.computer import ocr  # noqa: E402
+from helios.computer.interface import Element as _El, ScreenContext as _Ctx, Window as _Win  # noqa: E402
+
+
+def _fake_grab(px=b"\x01"):
+    return lambda rect: (px * (rect[2] * rect[3] * 4), rect[2], rect[3])
+
+
+def test_ocr_maps_to_screen_coordinates_redacts_and_caches():
+    calls = []
+
+    def rec(bgra, w, h, scale):
+        calls.append(scale)
+        return [("Save changes", (10, 20, 80, 12)), ("token sk-abcdefghijklmnopqrstuvwx", (10, 40, 90, 12)),
+                ("  ", (0, 0, 1, 1))]
+    lines = ocr.read_region((100, 200, 400, 300), grab=_fake_grab(), recognize=rec)
+    assert [e.rect for e in lines][:1] == [(110, 220, 80, 12)] and lines[0].source == "ocr"
+    assert "sk-abc" not in lines[1].name and "[redacted]" in lines[1].name and len(lines) == 2
+    assert calls == [2]                                                  # small window -> 2x upscale
+    ocr.read_region((100, 200, 400, 300), grab=_fake_grab(), recognize=rec)
+    assert calls == [2]                                                  # same pixels -> cached
+    ocr.read_region((100, 200, 400, 300), grab=_fake_grab(b"\x02"), recognize=rec)
+    assert calls == [2, 2]                                               # pixels changed -> re-read
+    ocr.read_region((0, 0, 3000, 2000), grab=_fake_grab(), recognize=rec)
+    assert calls[-1] == 1                                                # huge -> no upscale
+    assert ocr.read_region((0, 0, 0, 10), grab=_fake_grab(), recognize=rec) == []
+
+
+def test_ocr_reading_order():
+    els = [_El("text", "world", rect=(200, 10, 50, 10)), _El("text", "second line", rect=(5, 40, 50, 10)),
+           _El("text", "hello", rect=(5, 12, 50, 10))]
+    assert ocr.text_of(els) == "hello\nworld\nsecond line"
+
+
+def _ctx(app="notepad.exe", fg=True, sensitive="", chars=0):
+    w = _Win(hwnd=1, pid=1, app=app, title="t", rect=(0, 0, 800, 600), foreground=fg, sensitive=sensitive)
+    return _Ctx(window=w, text="x" * chars)
+
+
+@pytest.mark.parametrize("ctx,mode,want", [
+    (_ctx(chars=5), "auto", True),                    # thin UIA text -> probably pixels
+    (_ctx(chars=500), "auto", False),                 # UIA already has the text
+    (_ctx(app="mstsc.exe", chars=500), "auto", True),  # remote desktop is always pixels
+    (_ctx(chars=500), "on", True), (_ctx(chars=5), "off", False),
+    (_ctx(fg=False, chars=5), "on", False),            # covered windows: OCR would read the wrong pixels
+    (_ctx(sensitive="password manager", chars=0), "on", False),
+])
+def test_when_ocr_runs(ctx, mode, want):
+    assert controller._want_ocr(ctx, mode)[0] is want
+
+
+def test_screen_context_adds_ocr_for_pixel_windows(desk, monkeypatch):
+    desk.fg = C("Window", "Remote Desktop", [], pid=500, hwnd=5, rect=(0, 0, 800, 600))
+    desk.names[500] = "mstsc.exe"
+    desk.tops = [desk.fg]
+    monkeypatch.setattr(ocr, "available", lambda: (True, ""))
+    monkeypatch.setattr(ocr, "read_region", lambda rect: [_El("text", "Server error 500", rect=(10, 10, 90, 12), source="ocr")])
+    out = controller.format_context(controller.screen_context())
+    assert "OCR — may contain recognition errors" in out and "Server error 500" in out and "OCR (1 lines)" in out
+
+
+def test_ocr_never_touches_sensitive_windows(desk, monkeypatch):
+    desk.names[200] = "bitwarden.exe"
+    desk.fg = C("Window", "Vault", [], pid=200, hwnd=9)
+    monkeypatch.setattr(ocr, "available", lambda: (True, ""))
+    monkeypatch.setattr(ocr, "read_region", lambda rect: pytest.fail("OCR'd a password manager"))
+    assert controller.screen_context(ocr_mode="on").ocr_lines == []
+    assert controller.find_elements("Copy password")[1] == []
+
+
+def test_ocr_unavailable_is_reported(desk, monkeypatch):
+    desk.fg = C("Window", "Paint", [], hwnd=3)
+    monkeypatch.setattr(ocr, "available", lambda: (False, "Windows OCR bindings not installed"))
+    ctx = controller.screen_context(ocr_mode="on")
+    assert ctx.ocr_lines == [] and "not installed" in controller.format_context(ctx)
+
+
+def test_find_falls_back_to_ocr_with_a_visual_match(desk, monkeypatch):
+    desk.fg = C("Window", "Game launcher", [C("Button", "Settings")], pid=100, hwnd=4242, rect=(100, 50, 800, 600))
+    desk.tops = [desk.fg]
+    monkeypatch.setattr(ocr, "available", lambda: (True, ""))
+    monkeypatch.setattr(ocr, "read_region", lambda rect: [_El("text", "PLAY NOW", rect=(400, 300, 100, 20), source="ocr")])
+    ctx, m = controller.find_elements("play now")
+    assert m and m[0].source == "ocr"
+    out = controller.format_matches(ctx, m, "play now")
+    assert "visual match, not an element" in out and "screen (450, 310)" in out and "window-local (350, 260)" in out
+    assert "max_image_dimension=0" in out
+    ctx, m = controller.find_elements("settings")                       # a real control wins, no OCR
+    assert m[0].source == "uia"
+    _, m = controller.find_elements("play now", role="button")          # role asked -> elements only
+    assert m == []
+
+
+def test_ocr_wait_polls_status_without_an_event_loop():
+    from winrt.windows.foundation import AsyncStatus
+
+    class Op:
+        def __init__(self, states, result="R"):
+            self.states, self.result, self.cancelled = list(states), result, False
+
+        @property
+        def status(self):
+            return self.states.pop(0) if len(self.states) > 1 else self.states[0]
+
+        def get_results(self):
+            return self.result
+
+        def cancel(self):
+            self.cancelled = True
+    assert ocr._wait(Op([AsyncStatus.STARTED, AsyncStatus.STARTED, AsyncStatus.COMPLETED])) == "R"
+    with pytest.raises(RuntimeError):
+        ocr._wait(Op([AsyncStatus.ERROR]))
+    stuck = Op([AsyncStatus.STARTED])
+    with pytest.raises(TimeoutError):
+        ocr._wait(stuck, timeout=0.05)
+    assert stuck.cancelled
+
+
+def test_mcp_server_loads_native_dlls_before_the_stdio_loop():
+    # a first `import numpy` inside a tool call hangs the pythonw MCP server (stdin pipe read
+    # blocks DLL C-runtime init) — the preload must run before mcp.run()
+    src = (_ROOT / "mcp" / "helios_server.py").read_text(encoding="utf-8")
+    main = src[src.index('if __name__ == "__main__":'):]
+    assert main.index("_ocr.preload()") < main.index("mcp.run()")

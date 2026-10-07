@@ -66,6 +66,16 @@ kokoro-onnx>=0.5.0       # Kokoro v1.0 TTS (bundles espeak-ng via espeakng-loade
 #   pip install --no-deps RealtimeSTT==1.1.2 "silero-vad>=6.2.1"
 #   pip install halo==0.0.31
 # (helios/voice/realtime_stt.py falls back to the built-in capture when it isn't installed.)
+# --- Screen intelligence (helios/computer/) ---
+# UI Automation reading uses `uiautomation` (above). OCR fallback = Windows' built-in OCR engine
+# (offline, no model download, ~0.1-1 s per window). Optional: screen_context says so if missing.
+winrt-runtime==3.2.1
+winrt-Windows.Media.Ocr==3.2.1
+winrt-Windows.Graphics.Imaging==3.2.1
+winrt-Windows.Storage.Streams==3.2.1
+winrt-Windows.Globalization==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
 # Wake/VAD/feature models download once to the openwakeword package dir via
 #   python -c "from openwakeword.utils import download_models; download_models()"
 # Kokoro model assets live in data/voices/ (kokoro-v1.0.onnx + voices-v1.0.bin, gitignored).
