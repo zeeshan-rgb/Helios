@@ -203,8 +203,9 @@ def decide(tool_name: str, tool_input: dict, session_id: str = "") -> tuple[str,
     # YOLO mode: auto-approve everything that would otherwise pop an Approve/Deny prompt, for the
     # current chat. Placed AFTER the hard-rails above (panic + SSRF + ~/.claude + destructive screen
     # actions) so those still bite even in YOLO — it only short-circuits the classify()->ask path.
+    # Exception: Helios's own email send (gmail_send_draft) always asks — YOLO never sends mail.
     try:
-        if conf.YOLO_FLAG.exists():
+        if conf.YOLO_FLAG.exists() and not permissions.never_yolo(tool_name):
             return "allow", "autonomous (YOLO mode — all permissions for this chat)"
     except Exception:
         pass

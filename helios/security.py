@@ -8,6 +8,7 @@ what each protection does and where it is enforced.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from . import conf
@@ -117,12 +118,28 @@ def _check_logs() -> tuple[str, str]:
     return "ok", f"no secrets in {files} log file(s); new log lines are redacted"
 
 
+def _check_settings_secrets() -> tuple[str, str]:
+    """Tokens belong in secrets.toml (git-ignored, AI-protected), not settings.toml."""
+    import tomllib
+    try:
+        with (conf.CONFIG_DIR / "settings.toml").open("rb") as fh:
+            data = tomllib.load(fh)
+    except Exception:
+        return "ok", "settings.toml unreadable — nothing to check"
+    bad = [f"[{sec}] {k}" for sec, tbl in data.items() if isinstance(tbl, dict)
+           for k, v in tbl.items()
+           if re.search(r"(token|api_key|password|secret)$", k) and isinstance(v, str) and v.strip()]
+    if bad:
+        return "fail", f"secret(s) in settings.toml — move to config/secrets.toml: {', '.join(bad)}"
+    return "ok", "no tokens or keys in settings.toml"
+
+
 def self_check() -> list[tuple[str, str, str]]:
     checks: list[tuple[str, str, str]] = []
     for name, fn in (("permission gate", _check_gate), ("internal MCP server", _check_internal_mcp),
                      ("public MCP server", _check_public_mcp), ("protected paths", _check_protected),
                      ("Night Mode allowlist", _check_night_allowlist), ("git hygiene", _check_gitignore),
-                     ("secrets in logs", _check_logs)):
+                     ("secrets in logs", _check_logs), ("secrets in settings", _check_settings_secrets)):
         try:
             status, detail = fn()
         except Exception as e:

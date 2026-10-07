@@ -70,6 +70,19 @@ def _run_leads(args: dict) -> tuple[str, str]:
     return "ok", f"{len(reps)} service(s), {sum(len(r['new']) for r in reps)} new lead(s)"
 
 
+def _run_gmail_replies(args: dict) -> tuple[str, str]:
+    from . import gmail
+    if not gmail.enabled():
+        return "skipped", "Gmail replies are off ([gmail] enabled = false)"
+    if not gmail.signed_in():
+        return "skipped", "Gmail isn't connected (helios gmail login)"
+    out = gmail.check()
+    if out["errors"] and not out["drafted"] and not out["skipped"]:
+        return "failed", "; ".join(out["errors"])[:500]
+    return "ok", (f"{len(out['drafted'])} reply draft(s), {out['skipped']} skipped"
+                  + (f", {len(out['errors'])} error(s)" if out["errors"] else ""))
+
+
 def _run_learn(args: dict) -> tuple[str, str]:
     from . import learning
     from .night_mode.common import online
@@ -97,6 +110,7 @@ TYPES = {
     "project_health": ("Project health checks", _run_project_health, True),
     "research": ("Research", _run_research, True),
     "leads": ("Lead finder", _run_leads, True),
+    "gmail_replies": ("Draft replies to client emails", _run_gmail_replies, False),
     "learn": ("Learn from conversations", _run_learn, False),
     "morning_briefing": ("Morning briefing", _run_briefing, False),
     "night_mode": ("Night Mode", _run_night_mode, True),

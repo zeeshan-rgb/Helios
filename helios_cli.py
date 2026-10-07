@@ -440,7 +440,7 @@ def cmd_update(_args) -> int:
 def cmd_projects(args) -> int:
     """Project manifests: `helios projects [list [--all] | add <folder> [--name N] [--force] |
     changes [name] [--hours N] | check [name] [--only CHECK] | health [name] [--run] |
-    show <name>]`."""
+    show <name> | discover [--days N] | pick <n...>]`."""
     conf = _conf()
     from helios import projects
     args = list(args or [])
@@ -463,6 +463,31 @@ def cmd_projects(args) -> int:
             f = projects.add(" ".join(args), name, overwrite=force)
             print(f"Wrote {f}\n\n{f.read_text(encoding='utf-8')}\nReview and edit it; "
                   "`helios projects check <name>` runs its health checks.")
+        elif action == "discover":
+            days = int(opt("--days", 60))
+            print(f"Looking for folders you've worked in over the last {days} days "
+                  "(read-only; this can take a minute)...\n")
+            found = projects.discover_recent(days)
+            (conf.DATA_DIR / "projects_discovered.json").write_text(
+                json.dumps(found, indent=1), encoding="utf-8")
+            print(projects.format_discovered(found))
+            print("\nAdd the ones you want:  helios projects pick 1 3 5")
+        elif action == "pick" and args:
+            saved = conf.DATA_DIR / "projects_discovered.json"
+            if not saved.exists():
+                print("Run `helios projects discover` first.")
+                return 1
+            found = json.loads(saved.read_text(encoding="utf-8"))
+            for num in args:
+                if not num.isdigit() or not 1 <= int(num) <= len(found):
+                    print(f"  {num}: not in the list")
+                    continue
+                e = found[int(num) - 1]
+                try:
+                    f = projects.add(e["path"])
+                    print(f"  {num}: added {e['path']} -> {f.name}")
+                except (ValueError, FileExistsError) as err:
+                    print(f"  {num}: skipped {e['path']} ({err})")
         elif action == "changes":
             hours = float(opt("--hours", 24))
             print(projects.format_changes(projects.all_changes(hours, " ".join(args) or None)))
@@ -622,6 +647,115 @@ def cmd_usage(args) -> int:
     return 0
 
 
+def cmd_polarion(args) -> int:
+    """Polarion, read-only: `helios polarion [status | token <local|server> | projects [local|server]
+    | search <project> [query...] [--server] | item <project> <id> [--server]]`. The token is
+    typed at a hidden prompt here — never pasted into chat."""
+    _conf()
+    from helios import polarion
+    args = list(args or [])
+    inst = "server" if "--server" in args else "local"
+    args = [a for a in args if a not in ("--server", "--local")]
+    action = args.pop(0).lower() if args else "status"
+    try:
+        if action == "status":
+            print(polarion.format_status(polarion.status()))
+        elif action == "token" and args and args[0] in polarion.INSTANCES:
+            import getpass
+            print(f"Create a personal access token in Polarion ({args[0]}): your avatar > "
+                  "My Account > Personal Access Token. Paste it below (nothing will show).")
+            polarion.save_token(args[0], getpass.getpass("token: "))
+            print(f"Saved to config/secrets.toml [polarion] {args[0]}_token.")
+            print(polarion.format_status([r for r in polarion.status() if r["instance"] == args[0]]))
+        elif action == "projects":
+            print(polarion.format_projects(polarion.projects(args[0] if args else inst)))
+        elif action == "search" and args:
+            print(polarion.format_items(polarion.search(inst, args[0], " ".join(args[1:]))))
+        elif action == "item" and len(args) >= 2:
+            print(polarion.format_item(polarion.item(inst, args[0], args[1])))
+        else:
+            print(cmd_polarion.__doc__.split(":", 1)[1].strip())
+            return 2
+    except (polarion.PolarionError, ValueError) as e:
+        print(e)
+        return 1
+    return 0
+
+
+def cmd_gmail(args) -> int:
+    """Gmail: `helios gmail [status | setup <client.json> | login | logout | business [list | add
+    <email|@domain> | remove <x>] | inbox [query...] | check | drafts | show <n> | send <n> |
+    discard <n>]`. Helios drafts replies to business contacts only; nothing is sent without you."""
+    _conf()
+    from helios import gmail, jobs
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "status"
+    try:
+        if action == "status":
+            print(gmail.status_text())
+        elif action == "setup" and args:
+            gmail.setup_client(" ".join(args).strip('"'))
+            print("OAuth client saved to config/secrets.toml [gmail]. You can delete the downloaded "
+                  "file now.\nNext: helios gmail login")
+        elif action == "login":
+            print("Opening Google sign-in in your browser — sign in and allow access "
+                  "(read, draft and send; never permanent delete)...")
+            me = gmail.login(open_browser=None)
+            print(f"Connected as {me}.")
+            if not jobs.get("gmail_replies"):
+                every = str(gmail.cfg().get("check_every") or "every 30m")
+                jobs.add("gmail_replies", every, name="gmail_replies", source="gmail login")
+                print(f"Scheduled: check for client emails {every} (helios jobs to change).")
+            print("Add your clients:  helios gmail business add client@acme.com   (or @acme.com)")
+        elif action == "logout":
+            gmail.logout()
+            print("Signed out and the Google token revoked.")
+        elif action == "business":
+            sub = args.pop(0).lower() if args else "list"
+            if sub == "add" and args:
+                print(f"Business contact added: {gmail.add_business(args[0])}")
+            elif sub == "remove" and args:
+                print("Removed." if gmail.remove_business(args[0]) else
+                      "Not in your list (entries from settings.toml / leads are edited there).")
+            else:
+                items = gmail.business_entries()
+                print("\n".join(f"- {k}  ({v})" for k, v in sorted(items.items()))
+                      or "No business contacts yet — helios gmail business add client@acme.com")
+        elif action == "inbox":
+            print(gmail.format_messages(gmail.search(" ".join(args) or "in:inbox", 15)))
+        elif action == "check":
+            print("Checking unread mail from business contacts...")
+            out = gmail.check()
+            print(f"{len(out['drafted'])} reply draft(s), {out['skipped']} skipped.")
+            for e in out["errors"]:
+                print(f"  error: {e}")
+            if out["drafted"]:
+                print("\n" + gmail.format_pending(out["drafted"]))
+        elif action == "drafts":
+            print(gmail.format_pending(gmail.pending()))
+        elif action == "show" and args:
+            print(gmail.format_pending([gmail._pick(args[0])], verbose=True))
+        elif action == "send" and args:
+            d = gmail._pick(args[0])
+            print(gmail.format_pending([d], verbose=True))
+            print("(If you edited it in Gmail, your edited version is what gets sent.)")
+            if input(f"Send this reply to {d['to']}? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("Not sent.")
+                return 0
+            r = gmail.send_draft(args[0])
+            print(f"Sent to {', '.join(r['recipients'])}.")
+        elif action == "discard" and args:
+            d = gmail.discard_draft(args[0])
+            print(f"Discarded the draft to {d['to']}.")
+        else:
+            print(cmd_gmail.__doc__.split(":", 1)[1].strip())
+            return 2
+    except (gmail.GmailError, jobs.JobError, ValueError) as e:
+        print(e)
+        return 1
+    return 0
+
+
 def cmd_security(args) -> int:
     """Security self-check: `helios security` — is every protection in place? Read-only."""
     _conf()
@@ -754,6 +888,8 @@ _COMMANDS = {
     "security": cmd_security,
     "leads": cmd_leads,
     "usage": cmd_usage,
+    "polarion": cmd_polarion,
+    "gmail": cmd_gmail,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -777,6 +913,8 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  security      security self-check: is every protection in place?\n"
           "  leads         worldwide paid-work leads with price ranges: list / show / won / run\n"
           "  usage         AI tokens used per day and what for\n"
+          "  polarion      read-only Polarion (local + server): status / token / projects / search / item\n"
+          "  gmail         Gmail: setup / login / business contacts / inbox / reply drafts / send\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

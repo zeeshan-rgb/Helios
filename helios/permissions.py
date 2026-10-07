@@ -60,7 +60,11 @@ _HELIOS_ASK = {
     "run_in_background", "start_mission", "spawn_agent",    # spawn autonomous agents/teams
     "approve_lesson",       # a learned rule/skill takes effect only with the user's say-so
     "delete_job",           # destructive (removes a schedule + its history)
+    "gmail_send_draft",     # sends an email to a real person — only with the user's yes
+    "gmail_add_business_contact",   # widens who Helios drafts replies for
 }
+# Helios's own tools that contact a real person (blocked outright for background agents).
+_HELIOS_OUTBOUND = {"gmail_send_draft"}
 # Verb tokens used to classify connected-app (Composio) actions. Matched against the tool id
 # split into tokens (underscore + camelCase) so APP_SEND_X and APPSENDX both gate correctly.
 _WRITE_TOKENS = {
@@ -93,11 +97,19 @@ def is_outbound_send(tool_name: str) -> bool:
     """True if the tool sends something outward to real people. Used to STRUCTURALLY block
     background/side agents from contacting anyone (the persona's HARD RULE), independent of the
     normal ask/allow policy — a background agent the user isn't watching must never message/email/post.
-    Scoped to the connected-app (Composio) surface, which is where outbound actions live."""
+    Covers the connected-app (Composio) surface and Helios's own send tools (gmail_send_draft)."""
     name = tool_name or ""
+    if name.startswith("mcp__helios__"):
+        return name.split("mcp__helios__", 1)[1] in _HELIOS_OUTBOUND
     if name.startswith("mcp__composio__"):
         return bool(_split_tokens(name.split("mcp__composio__", 1)[1]) & _OUTBOUND_TOKENS)
     return False
+
+
+def never_yolo(tool_name: str) -> bool:
+    """Helios's own email send always goes to the Approve/Deny prompt, even in YOLO mode."""
+    name = tool_name or ""
+    return name.startswith("mcp__helios__") and name.split("mcp__helios__", 1)[1] in _HELIOS_OUTBOUND
 
 
 def is_claude_dir(path: str) -> bool:
