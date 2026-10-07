@@ -159,7 +159,7 @@ def decide(tool_name: str, tool_input: dict, session_id: str = "") -> tuple[str,
     # structurally (a hard rail: bites even in YOLO), not just in the prompt, so a runaway background
     # agent physically cannot send an email/message/post. The live interactive brain sets no role, so
     # this never touches normal use.
-    if os.environ.get("HELIOS_AGENT_ROLE") == "side" and permissions.is_outbound_send(tool_name):
+    if os.environ.get("HELIOS_AGENT_ROLE") == "side" and permissions.is_outbound_action(tool_name, tool_input):
         return "deny", "a background agent can't send outbound messages — only the live assistant can, with your ok"
 
     # Credential stores and secrets (SSH keys, password managers, browser credential stores, API
@@ -203,9 +203,10 @@ def decide(tool_name: str, tool_input: dict, session_id: str = "") -> tuple[str,
     # YOLO mode: auto-approve everything that would otherwise pop an Approve/Deny prompt, for the
     # current chat. Placed AFTER the hard-rails above (panic + SSRF + ~/.claude + destructive screen
     # actions) so those still bite even in YOLO — it only short-circuits the classify()->ask path.
-    # Exception: Helios's own email send (gmail_send_draft) always asks — YOLO never sends mail.
+    # Exception: Helios's own outbound actions (gmail_send_draft, confirmed browser submits)
+    # always ask — YOLO never sends mail or submits a website form for you.
     try:
-        if conf.YOLO_FLAG.exists() and not permissions.never_yolo(tool_name):
+        if conf.YOLO_FLAG.exists() and not permissions.never_yolo(tool_name, tool_input):
             return "allow", "autonomous (YOLO mode — all permissions for this chat)"
     except Exception:
         pass

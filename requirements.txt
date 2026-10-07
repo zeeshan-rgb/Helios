@@ -66,6 +66,10 @@ kokoro-onnx>=0.5.0       # Kokoro v1.0 TTS (bundles espeak-ng via espeakng-loade
 #   pip install --no-deps RealtimeSTT==1.1.2 "silero-vad>=6.2.1"
 #   pip install halo==0.0.31
 # (helios/voice/realtime_stt.py falls back to the built-in capture when it isn't installed.)
+# --- Hidden browser (helios/web/browser.py) ---
+# Drives the INSTALLED Edge/Chrome headless (channel="msedge"/"chrome"), so no
+# `playwright install` browser download is needed.
+playwright==1.63.0
 # --- Screen intelligence (helios/computer/) ---
 # UI Automation reading uses `uiautomation` (above). OCR fallback = Windows' built-in OCR engine
 # (offline, no model download, ~0.1-1 s per window). Optional: screen_context says so if missing.
