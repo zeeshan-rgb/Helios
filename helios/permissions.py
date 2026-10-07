@@ -62,9 +62,17 @@ _HELIOS_ASK = {
     "delete_job",           # destructive (removes a schedule + its history)
     "gmail_send_draft",     # sends an email to a real person — only with the user's yes
     "gmail_add_business_contact",   # widens who Helios drafts replies for
+    "browser_download",     # saves a file from the web (hidden browser sandbox)
 }
 # Helios's own tools that contact a real person (blocked outright for background agents).
 _HELIOS_OUTBOUND = {"gmail_send_draft"}
+# Hidden-browser actions that, with confirm=true, submit / send / buy / sign up on a website —
+# the browser refuses them without confirm, and confirm=true routes to the user's prompt.
+_HELIOS_CONFIRMED = {"browser_click", "browser_type"}
+
+
+def _truthy(v) -> bool:
+    return v is True or str(v).strip().lower() in ("true", "1", "yes")
 # Verb tokens used to classify connected-app (Composio) actions. Matched against the tool id
 # split into tokens (underscore + camelCase) so APP_SEND_X and APPSENDX both gate correctly.
 _WRITE_TOKENS = {
@@ -106,10 +114,24 @@ def is_outbound_send(tool_name: str) -> bool:
     return False
 
 
-def never_yolo(tool_name: str) -> bool:
-    """Helios's own email send always goes to the Approve/Deny prompt, even in YOLO mode."""
+def is_outbound_action(tool_name: str, tool_input: dict | None = None) -> bool:
+    """is_outbound_send, plus Helios tools whose INPUT makes them act on someone's behalf: a
+    confirmed hidden-browser click/Enter on a submit / send / buy / sign-up control."""
+    if is_outbound_send(tool_name):
+        return True
     name = tool_name or ""
-    return name.startswith("mcp__helios__") and name.split("mcp__helios__", 1)[1] in _HELIOS_OUTBOUND
+    if name.startswith("mcp__helios__") and name.split("mcp__helios__", 1)[1] in _HELIOS_CONFIRMED:
+        return _truthy((tool_input or {}).get("confirm"))
+    return False
+
+
+def never_yolo(tool_name: str, tool_input: dict | None = None) -> bool:
+    """Helios's own outbound actions (email send, confirmed browser submits) always go to the
+    Approve/Deny prompt, even in YOLO mode."""
+    name = tool_name or ""
+    if not name.startswith("mcp__helios__"):
+        return False
+    return name.split("mcp__helios__", 1)[1] in _HELIOS_OUTBOUND or is_outbound_action(name, tool_input)
 
 
 def is_claude_dir(path: str) -> bool:
@@ -229,6 +251,8 @@ def classify(tool_name: str, tool_input: dict | None) -> str:
                         or _in_work_sandbox(str(_WORK_SANDBOX / target))):
                     return "ask"
             return "allow"
+        if base in _HELIOS_CONFIRMED and _truthy(inp.get("confirm")):
+            return "ask"
         return "ask" if base in _HELIOS_ASK else "allow"
     # benign discovery / planning — autonomous. NOTE: WebFetch is deliberately NOT here; it's
     # gated below (exfiltration/SSRF vector). WebSearch returns summaries, not raw page fetch.

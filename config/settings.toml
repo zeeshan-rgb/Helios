@@ -295,6 +295,16 @@ disabled_tools = []    # e.g. ["open_app", "run_project_tests"]
 # the normal policy, which still asks you first. Keep this empty unless you really need it.
 allow_protected = []
 
+[browser]
+# Helios's HIDDEN browser (Playwright driving the installed Edge/Chrome headless, fresh profile —
+# never your logins). Every request is checked: no internal addresses, even via redirects/DNS.
+# Submitting forms / sending / buying needs your approval; it never types passwords or card numbers.
+channels = ["msedge", "chrome"]   # tried in order (installed browsers — no extra download)
+block_media = true               # skip images/video/fonts: faster, lighter (~650 MB while open)
+idle_close_sec = 180             # close the browser after this long unused
+max_tabs = 6
+page_timeout_sec = 25
+
 [polarion]
 # Read-only access to Polarion through its REST API — Helios can search and read work items but has
 # no way to create, change or delete anything. Tokens do NOT go here: run
