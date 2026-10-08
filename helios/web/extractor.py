@@ -14,7 +14,18 @@ import re
 from .. import conf
 
 MIN_ARTICLE_CHARS = 200
+SHORT_ARTICLE = 1200          # below this, also keep the page's visible text (alt_text) for checks
 MAX_TEXT = 60000
+# Site chrome Trafilatura sometimes returns AS the article (live: a GitHub release page came back
+# as only "You signed in with another tab or window. Reload to refresh your session.").
+_BOILERPLATE = re.compile(
+    r"(you signed (in|out) with another tab or window\.?|you switched accounts on another tab or window\.?|"
+    r"reload to refresh your session\.?|dismiss alert|skip to (main )?content|"
+    r"we use cookies[^.\n]*\.?|accept (all )?cookies|sign in to (view|continue)[^.\n]*\.?)", re.I)
+
+
+def strip_boilerplate(text: str) -> str:
+    return re.sub(r"[ \t]{2,}", " ", _BOILERPLATE.sub(" ", text or "")).strip()
 _JS_SHELL = re.compile(r"(enable javascript|javascript (is )?(required|disabled)|you need to enable "
                        r"javascript|please turn on javascript|this app works best with javascript)", re.I)
 
@@ -71,10 +82,12 @@ def extract(html: str, url: str, *, rendered_text: str = "") -> dict:
             meta["tags"] = [str(t)[:40] for t in tags][:15]
     except Exception as e:  # pragma: no cover - library missing or broken input
         conf.log("web", f"trafilatura failed on {url[:120]}: {e}")
+    text = strip_boilerplate(text)
+    visible = None
     if len(text.strip()) < MIN_ARTICLE_CHARS:
-        fallback = rendered_text or visible_text(html)
-        if len(fallback.strip()) > len(text.strip()):
-            text, method = fallback, "visible-text"
+        visible = strip_boilerplate(rendered_text or visible_text(html))
+        if len(visible.strip()) > len(text.strip()):
+            text, method = visible, "visible-text"
     if not meta.get("title"):
         m = re.search(r"<title[^>]*>(.*?)</title>", html or "", re.I | re.S)
         meta["title"] = re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
@@ -82,4 +95,9 @@ def extract(html: str, url: str, *, rendered_text: str = "") -> dict:
     out = {k: (_clean(str(v), 300) if isinstance(v, str) else v) for k, v in meta.items() if v}
     out.update(text=text, method=method, chars=len(text),
                text_hash=hashlib.sha256(text.encode("utf-8")).hexdigest()[:16])
+    if method == "trafilatura" and len(text) < SHORT_ARTICLE:
+        # a short "article" may be the wrong block — keep the whole visible text for source checks
+        visible = visible if visible is not None else strip_boilerplate(rendered_text or visible_text(html))
+        if len(visible) > 2 * len(text):
+            out["alt_text"] = _clean(visible, 20000)
     return out

@@ -126,7 +126,9 @@ def _one_line(v) -> str:
 
 
 _FIELDS = ("id", "topic", "project", "found", "last_seen", "seen", "status", "source_name",
-           "source_url", "source_check", "published", "confidence", "uncertainty")
+           "source_url", "source_check", "published", "confidence", "uncertainty",
+           # provenance from actually reading the source (Phase 6)
+           "source_title", "source_date", "fetched_at", "rendered", "grounding", "evidence")
 
 
 def _write(f: dict) -> None:
@@ -281,9 +283,33 @@ def _duplicate_of(f: dict, existing: list[dict]) -> dict | None:
     return None
 
 
+def verify_source(url: str, claim: str, verify=None) -> dict:
+    """Read the cited page (helios.web.sources: resolve redirect → render if needed → extract →
+    grounding). A custom `verify` (tests, old callers) may return 'ok' | (final, status) | dict."""
+    from .web import sources
+    if verify is not None:
+        return sources.normalize(verify(url), url)
+    return sources.check(url, claim)
+
+
+def _apply_provenance(f: dict, chk: dict, *, weak_penalty: float = 0.6) -> None:
+    """Copy what reading the source proved onto the finding; a page that barely mentions the claim
+    lowers confidence (it may be the wrong page, or the claim may be overstated)."""
+    if not chk.get("read"):
+        if chk.get("status") == "blocked":
+            f["grounding"] = "not checked (site blocks automated reading)"
+        return
+    f.update(source_title=_one_line(chk.get("page_title"))[:160], source_date=chk.get("page_date", ""),
+             fetched_at=chk.get("fetched_at", ""), rendered="yes" if chk.get("rendered") else "",
+             grounding=chk.get("grounding", ""), evidence=_one_line(chk.get("excerpt"))[:300])
+    if chk.get("grounding") == "weak":
+        f["confidence"] = round(f["confidence"] * weak_penalty, 2)
+        f["uncertainty"] = ("The source page barely mentions this — double-check it. "
+                            + f.get("uncertainty", "")).strip()
+
+
 def store(topic: str, project: str, raw_findings: list, *, verify=None) -> dict:
     """Validate, verify sources, de-duplicate and save. Returns counts + the saved findings."""
-    verify = verify or check_source      # looked up at call time (patchable; no early binding)
     now = datetime.now().isoformat(timespec="seconds")
     existing = findings(topic, limit=100000)
     out = {"new": [], "duplicates": [], "dropped": []}
@@ -298,13 +324,14 @@ def store(topic: str, project: str, raw_findings: list, *, verify=None) -> dict:
             continue
         # Verify BEFORE de-duplicating: the check resolves redirect links to the real article, so
         # the same story found twice (with fresh redirect links each run) is still recognised.
-        checked = verify(f["source_url"])
-        final, status = checked if isinstance(checked, tuple) else (f["source_url"], checked)
+        chk = verify_source(f["source_url"], f"{f['title']} {f['summary']}", verify)
+        final, status = chk.get("final_url") or f["source_url"], chk.get("status", "failed")
         if final and final != f["source_url"] and _valid_url(final):
             f["source_url"] = final[:500]
         if status != "failed" and _redirector(f["source_url"]):
             status = "failed"                 # never ended up at a real page
         f["source_check"] = status
+        _apply_provenance(f, chk)
         dup = _duplicate_of(f, existing + out["new"])
         if dup:
             dup["last_seen"] = now
@@ -420,7 +447,11 @@ def run(topic_names: list[str] | None = None, *, call=None, verify=None) -> list
         chosen = [known.get(n.lower(), {"topic": n.strip(), "project": ""}) for n in topic_names if n.strip()]
     else:
         chosen = pick()
-    return [research_topic(t["topic"], t["project"], call=call, verify=verify) for t in chosen]
+    try:
+        return [research_topic(t["topic"], t["project"], call=call, verify=verify) for t in chosen]
+    finally:
+        from .web import browser
+        browser.close_shared()           # don't keep ~650 MB of headless Edge around afterwards
 
 
 def night_task(ctx: dict):
@@ -482,6 +513,15 @@ def format_findings(items: list[dict], *, verbose: bool = False) -> str:
             if f.get("uncertainty"):
                 out.append(f"    uncertain: {f['uncertainty']}")
             out.append(f"    {f.get('source_url')}")
+            if f.get("source_title") or f.get("grounding"):
+                prov = [f"page \"{f['source_title']}\"" if f.get("source_title") else "",
+                        f"dated {f['source_date']} (estimated)" if f.get("source_date") else "",
+                        f"read {f['fetched_at'][:16]}" if f.get("fetched_at") else "",
+                        "rendered" if f.get("rendered") else "",
+                        f"support: {f['grounding']}" if f.get("grounding") else ""]
+                out.append("    source: " + " · ".join(p for p in prov if p))
+            if f.get("evidence"):
+                out.append(f"    evidence: \"{f['evidence']}\"")
     return "\n".join(out)
 
 
@@ -494,7 +534,8 @@ def format_run(reports: list[dict]) -> str:
         lines.append(f"{r['topic']}: {len(r['new'])} new, {len(r['duplicates'])} already known, "
                      f"{len(r['dropped'])} dropped ({r['seconds']}s)")
         lines += [f"  + {f['title']} — {f['source_name']} (confidence {f['confidence']:.1f}, "
-                  f"source {f['source_check']})" for f in r["new"]]
+                  f"source {f['source_check']}"
+                  + (f", support {f['grounding']}" if f.get("grounding") else "") + ")" for f in r["new"]]
         lines += [f"  = {d['title']}" for d in r["duplicates"]]
         if r["dropped"]:
             lines.append(f"  dropped: {', '.join(sorted(set(r['dropped'])))}")

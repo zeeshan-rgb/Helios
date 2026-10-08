@@ -55,3 +55,42 @@ result + provenance → cache (24 h, extracted text only) → research / leads /
 
 Settings: `[web] cache_hours`, `crawl_delay_sec`. Cache: `data/web_cache/` (JSON, at most
 2,000 entries).
+
+## Source verification for research and leads (Phase 6, `helios/web/sources.py`)
+
+Antigravity still *finds* candidates (`search_web` + `read_url_content`; that's also how Reddit
+posts are seen). Helios then *reads* every cited source itself before saving:
+
+```
+source_url (often a search redirect) → resolve → scraper.get(purpose="crawl")
+  → ok:      provenance (page title, site, estimated date, fetch time, rendered?) + support score
+  → blocked: site refuses automated reading (403/429, bot check, robots.txt) — exists, not penalised
+  → failed:  dead / 404 / 5xx / unreachable
+```
+
+* **Support score:** the share of the claim's significant words found on the page (stemmed).
+  ≥ 0.5 is *strong*, ≥ 0.25 is *partial*, below that is *weak*. When the main extraction is short,
+  the page's whole visible text is checked too (`alt_text`).
+* **Research:** a *weak* finding keeps its source but loses 40% confidence and says "the source
+  page barely mentions this". A *blocked* finding isn't penalised. Each note stores
+  `source_title`, `source_date` (estimated), `fetched_at`, `rendered`, `grounding` and an
+  `evidence` quote.
+* **Leads, dropped when:**
+  * someone is *offering* services ("[For Hire]", "available for work") — checked on the agent's
+    title before fetching, then on the page;
+  * the post doesn't mention the need (*weak*);
+  * the post is older than `max_post_age_days` (45);
+  * the link is dead.
+* **Leads, other rules:**
+  * No hiring signal on the page and no budget: confidence × 0.7.
+  * The evidence quote has phone numbers and emails removed.
+  * A *blocked* site (Reddit: its `robots.txt` asks bots not to read posts) keeps the
+    search-seen lead, marked "not checked (seen via search)".
+* **Fallback:** if the page can't be read for a *network* reason, a plain "does the link open"
+  check (`research.check_source`) decides ok / blocked / failed. Never for refusals or
+  `robots.txt`.
+* **Resources:** each batch closes the hidden browser when it finishes.
+
+Live check against the existing vault: 4 Reddit leads → *blocked by robots.txt* (kept as
+search-seen); 4 research findings → read, with support of 0.43 / 0.52 / 0.54 / 0.82 (the 0.54 one
+was 0.0 until GitHub's session banner stopped being mistaken for the release notes).

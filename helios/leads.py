@@ -72,6 +72,8 @@ outdated, no website at all). Worldwide unless told otherwise.
 
 Rules:
 - Every lead MUST have the exact public source_url where you saw it. No URL -> leave it out.
+- Only CLIENTS who need the work. Skip people offering their own services ("[For Hire]" posts,
+  portfolios, "available for work") — they are competitors, not leads.
 - Never invent details. If a budget isn't stated, leave budget_stated empty.
 - Privacy: no private individuals' personal phone numbers, home addresses or personal emails.
   For a person's post, contact is "reply on the post". For a business, its public contact page
@@ -153,7 +155,9 @@ def library() -> Path:
 
 _FIELDS = ("id", "service", "status", "found", "updated", "client", "location", "posted", "scope",
            "price_min", "price_max", "currency", "budget_stated", "source_name", "source_url",
-           "source_check", "contact", "confidence")
+           "source_check", "contact", "confidence",
+           # provenance from actually reading the post (Phase 6)
+           "source_title", "fetched_at", "rendered", "grounding")
 
 
 def _one(v) -> str:
@@ -162,8 +166,10 @@ def _one(v) -> str:
 
 def _write(ld: dict) -> None:
     body = ["---"] + [f"{k}: {_one(ld.get(k, ''))}" for k in _FIELDS] + ["---", "",
-            f"# {ld['title']}", "", ld["need"], "", "## Why it fits", ld.get("fit", ""), "",
-            "## Pitch draft (you send it)", ld.get("pitch", ""), ""]
+            f"# {ld['title']}", "", ld["need"], "", "## Why it fits", ld.get("fit", ""), ""]
+    if ld.get("evidence"):
+        body += ["## Evidence from the source", f"> {ld['evidence']}", ""]
+    body += ["## Pitch draft (you send it)", ld.get("pitch", ""), ""]
     p = Path(ld["path"])
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("\n".join(body), encoding="utf-8")
@@ -192,6 +198,8 @@ def _parse(path: Path) -> dict | None:
         name, _, txt = sec.partition("\n")
         if name.startswith("Why it fits"):
             ld["fit"] = txt.strip()
+        elif name.startswith("Evidence"):
+            ld["evidence"] = txt.strip().lstrip("> ").strip()
         elif name.startswith("Pitch draft"):
             ld["pitch"] = txt.strip()
     ld["path"] = str(path)
@@ -306,6 +314,29 @@ def clean(raw: dict, service: str) -> tuple[dict | None, str]:
             "confidence": round(confidence, 2)}, ""
 
 
+# Someone ADVERTISING their own services (r/forhire "[For Hire]", "available for work") is not a
+# client — it's competition.
+_OFFERING = re.compile(r"(\[\s*for\s*hire\s*\]|\(\s*for\s*hire\s*\)|^\s*for\s*hire\b|"
+                       r"\bavailable for (freelance |new )?(work|projects|hire)\b|\bhire me\b|"
+                       r"\bi am offering\b|\bmy services\b.{0,40}\bavailable\b)", re.I)
+_HIRING = re.compile(r"(\[\s*(hiring|task|paid)\s*\]|\bhiring\b|\blooking for\b|\bneed(s|ed)? (a|an|someone|help)\b|"
+                     r"\bseeking\b|\bbudget\b|\bquote\b|\bwanted\b|\brequire(s|d)?\b|\bpaid\b|\bwilling to pay\b)", re.I)
+
+
+def offering_not_hiring(title: str, page_title: str = "", page_text: str = "") -> bool:
+    head = f"{title}\n{page_title}\n{(page_text or '')[:400]}"
+    return bool(_OFFERING.search(head)) and not re.search(r"\[\s*hiring\s*\]", head, re.I)
+
+
+def too_old(posted: str, max_days: int) -> int:
+    """Days since `posted` (YYYY-MM-DD) when older than max_days, else 0."""
+    try:
+        age = (datetime.now() - datetime.strptime(posted[:10], "%Y-%m-%d")).days
+    except (ValueError, TypeError):
+        return 0
+    return age if age > max_days else 0
+
+
 def _duplicate_of(ld: dict, existing: list[dict]) -> dict | None:
     nu = research.norm_url(ld["source_url"])
     toks = memory_store._tokens(f"{ld['title']} {ld['need']}")
@@ -319,11 +350,13 @@ def _duplicate_of(ld: dict, existing: list[dict]) -> dict | None:
 
 
 def store(service: str, raw_leads: list, *, verify=None) -> dict:
-    verify = verify or research.check_source
+    """Validate → read the actual post (helios.web.sources) → drop what the post doesn't support →
+    de-duplicate → save. A custom `verify` (tests) may return 'ok' | (final, status) | dict."""
     now = datetime.now().isoformat(timespec="seconds")
     existing = all_leads()
     out = {"new": [], "duplicates": [], "dropped": []}
     cap = _int("max_leads_per_service", 3, 1, 10)
+    max_days = _int("max_post_age_days", 45, 1, 365)
     for raw in (raw_leads or [])[:cap * 2]:
         if not isinstance(raw, dict):
             out["dropped"].append("not an object")
@@ -332,8 +365,14 @@ def store(service: str, raw_leads: list, *, verify=None) -> dict:
         if not ld:
             out["dropped"].append(why)
             continue
-        checked = verify(ld["source_url"])
-        final, status = checked if isinstance(checked, tuple) else (ld["source_url"], checked)
+        if offering_not_hiring(ld["title"]):
+            out["dropped"].append("someone offering services, not a client")
+            continue
+        if (age := too_old(ld["posted"], max_days)):
+            out["dropped"].append(f"posted {age} days ago (older than {max_days})")
+            continue
+        chk = research.verify_source(ld["source_url"], f"{ld['title']} {ld['need']}", verify)
+        final, status = chk.get("final_url") or ld["source_url"], chk.get("status", "failed")
         if final and final != ld["source_url"] and research._valid_url(final):
             ld["source_url"] = final[:500]
         if status != "failed" and research._redirector(ld["source_url"]):
@@ -345,6 +384,24 @@ def store(service: str, raw_leads: list, *, verify=None) -> dict:
             out["dropped"].append("source is a listing page, not the post itself")
             continue
         ld["source_check"] = status
+        if chk.get("read"):
+            # we actually read the post: it must really be a client asking for this work
+            if offering_not_hiring("", chk.get("page_title", ""), chk.get("text", "")):
+                out["dropped"].append("someone offering services, not a client")
+                continue
+            if chk.get("grounding") == "weak":
+                out["dropped"].append("the source page doesn't mention this need")
+                continue
+            if not ld["posted"] and (age := too_old(chk.get("page_date", ""), max_days)):
+                out["dropped"].append(f"page dated {age} days ago (older than {max_days})")
+                continue
+            if not _HIRING.search(chk.get("text", "")[:4000]) and not ld["budget_stated"]:
+                ld["confidence"] = round(ld["confidence"] * 0.7, 2)   # no clear hiring signal
+            ld.update(source_title=_one(chk.get("page_title"))[:160], fetched_at=chk.get("fetched_at", ""),
+                      rendered="yes" if chk.get("rendered") else "", grounding=chk.get("grounding", ""),
+                      evidence=_one(chk.get("excerpt"))[:300])
+        elif status == "blocked":
+            ld["grounding"] = "not checked (site blocks automated reading — seen via search)"
         if _duplicate_of(ld, existing + out["new"]):
             out["duplicates"].append(ld)
             continue
@@ -440,7 +497,11 @@ def search_service(service: str, *, call=None, verify=None) -> dict:
 
 def run(service_names: list[str] | None = None, *, call=None, verify=None) -> list[dict]:
     chosen = [s for s in (service_names or pick()) if s in SERVICES]
-    return [search_service(s, call=call, verify=verify) for s in chosen]
+    try:
+        return [search_service(s, call=call, verify=verify) for s in chosen]
+    finally:
+        from .web import browser
+        browser.close_shared()           # don't keep ~650 MB of headless Edge around afterwards
 
 
 def night_task(ctx: dict):
@@ -489,6 +550,13 @@ def format_leads(items: list[dict], *, verbose: bool = False) -> str:
             if d.get("fit"):
                 out.append(f"    fit: {d['fit']}")
             out.append(f"    contact: {d.get('contact', '')} · source: {d.get('source_url', '')}")
+            if d.get("grounding") or d.get("source_title"):
+                prov = [f"page \"{d['source_title']}\"" if d.get("source_title") else "",
+                        f"read {str(d['fetched_at'])[:16]}" if d.get("fetched_at") else "",
+                        f"support: {d['grounding']}" if d.get("grounding") else ""]
+                out.append("    checked: " + " · ".join(p for p in prov if p))
+            if d.get("evidence"):
+                out.append(f"    evidence: \"{d['evidence']}\"")
             if d.get("pitch"):
                 out.append(f"    pitch: {d['pitch']}")
     return "\n".join(out)
