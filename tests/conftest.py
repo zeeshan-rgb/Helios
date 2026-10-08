@@ -47,6 +47,20 @@ def _no_real_toasts(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_web(monkeypatch):
+    """Tests never fetch real web pages or start the hidden browser through the scraper's default
+    fetchers (research/leads now read their sources). Tests that exercise fetching pass their own
+    fetcher/renderer, or patch research.check_source for the plain link check."""
+    try:
+        from helios.web import scraper
+    except Exception:  # pragma: no cover
+        return
+    offline = lambda url, *a, **k: scraper.Page(requested_url=url, error="network disabled in tests")  # noqa: E731
+    monkeypatch.setattr(scraper, "fetch_http", offline)
+    monkeypatch.setattr(scraper, "fetch_rendered", offline)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_agy(monkeypatch):
     """Tests never launch the real Antigravity CLI (slow, networked, uses the user's quota).
     A scripted stand-in (a .py 'bin', see test_antigravity's fake_agy) still works."""

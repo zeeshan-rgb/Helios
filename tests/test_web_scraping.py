@@ -250,3 +250,15 @@ def test_mcp_tool_registered_and_allowed():
     assert callable(srv.web_extract)
     assert permissions.classify("mcp__helios__web_extract", {"url": "https://x.example"}) == "allow"
     assert "web_extract" not in (_ROOT / "mcp" / "helios_public_server.py").read_text(encoding="utf-8")
+
+
+def test_site_chrome_is_not_taken_as_the_article():
+    # live: a GitHub release page came back as only GitHub's session banner (237 chars), so the
+    # release notes were never read and a correct research finding looked unsupported
+    notes = "<li>Cache poisoning of SSG and ISR pages in self-hosted Next.js applications</li>" * 6
+    html = ("<html><body><div class=flash>You signed in with another tab or window. Reload to refresh your "
+            "session. You signed out in another tab or window. Reload to refresh your session. Dismiss alert"
+            f"</div><div class=markdown-body><h1>v16.3.8</h1><ul>{notes}</ul></div></body></html>")
+    ex = extractor.extract(html, "https://github.com/vercel/next.js/releases/tag/v16.3.8")
+    combined = ex["text"] + ex.get("alt_text", "")
+    assert "Reload to refresh your session" not in combined and "Cache poisoning" in combined

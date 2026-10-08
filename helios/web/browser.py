@@ -493,5 +493,15 @@ def shared() -> Browser:
         return _shared
 
 
+def close_shared() -> None:
+    """Close the shared hidden browser if it's running (end of a research / leads batch)."""
+    b = _shared
+    if b is not None and b.running:
+        try:
+            b.close()
+        except Exception:
+            pass
+
+
 def as_json(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=1)[:20000]

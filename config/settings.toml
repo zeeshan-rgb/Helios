@@ -209,7 +209,7 @@ barge_threshold = 0.6      # stricter wake bar WHILE speaking (the open mic hear
 dictation_hotkey = "<ctrl>+<alt>+d"   # push-to-talk: transcribe speech into the focused field
 talk_hotkey = "<ctrl>+<alt>+h"        # talk to Helios: same as saying "hey Helios" (chime, then speak)
 listen_sec = 8             # after a wake word / clap / talk key: seconds to wait for you to start
-muted = true
+muted = false
 
 [server]
 host = "127.0.0.1"
@@ -342,8 +342,13 @@ region = "worldwide"
 services = ["web_dev", "app_dev", "web_enhancement", "digital_marketing", "logo_design", "pamphlet_design", "youtube_content"]
 per_night = 3                # services searched per night (they rotate) — ~150-180k tokens each
 max_leads_per_service = 3
+max_post_age_days = 45       # skip posts older than this (stale requests are usually filled)
 currency = "USD"
 timeout = 480                # seconds per service search
+# Every lead's post is READ before it's saved (where the site allows it): "[For Hire]" posts
+# (freelancers, not clients), posts that don't mention the need, and stale posts are dropped,
+# and a short evidence quote is kept (phone numbers and emails removed). Sites that block
+# automated reading (e.g. Reddit) keep the search-seen lead, marked "not checked".
 # Rate card: [min, max] per job size. small = one simple deliverable, medium = a typical project,
 # large = a big or ongoing project. Edit freely — prices are computed from these, never by the AI.
 [leads.rates.web_dev]
