@@ -5,6 +5,7 @@ Antigravity internals anywhere in Helios's code."""
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import re
 import subprocess
@@ -34,7 +35,10 @@ def _list_tools(env: dict) -> set[str]:
 
 def test_public_server_serves_nothing_inside_a_helios_brain_session():
     base = {k: v for k, v in os.environ.items() if not k.startswith("HELIOS_")}
-    assert len(_list_tools(base)) == 13                                  # e.g. the Antigravity IDE
+    pub = importlib.util.spec_from_file_location("pub_count", SERVER)
+    mod = importlib.util.module_from_spec(pub)
+    pub.loader.exec_module(mod)
+    assert _list_tools(base) == set(mod.TOOLS)                           # e.g. the Antigravity IDE
     assert _list_tools(base | {agy_cli.MARKER_ENV: "C:/x/marker.ok"}) == set()   # Helios's own agy
 
 

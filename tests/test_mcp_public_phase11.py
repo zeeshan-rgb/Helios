@@ -22,7 +22,9 @@ SERVER = _ROOT / "mcp" / "helios_public_server.py"
 BLUEPRINT_TOOLS = {"get_system_status", "get_project_status", "search_memory", "save_memory",
                    "get_recent_memory", "create_reminder", "get_morning_report", "open_app",
                    "safe_diagnostic", "run_project_tests", "get_project_changes", "search_research",
-                   "get_active_projects"}
+                   "get_active_projects",
+                   # multimodal-spec phase 11 additions (all read-only, all gated)
+                   "get_capabilities", "get_night_mode_status"}
 
 
 def _load():

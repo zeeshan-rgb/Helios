@@ -53,6 +53,9 @@ DEFAULT_SCHEDULE = {
     "update_rules_skills": "03:45", "project_summaries": "04:00",
 }
 DEFAULT_START, DEFAULT_END = "01:00", "05:00"
+# CPU / browser / network heavy: skipped on a low battery (laptop unplugged overnight).
+HEAVY_TASKS = {"run_checks", "research", "find_leads", "business_prospecting"}
+DEFAULT_MIN_BATTERY = 30
 GAP_SECONDS = 180            # a heartbeat gap longer than this = asleep / not running
 MAX_DAYS = 3                 # never learn from more than this many days in one run
 LOCK_STALE_HOURS = 12
@@ -70,6 +73,44 @@ def cfg() -> dict:
 
 def enabled() -> bool:
     return bool(cfg().get("enabled", False))
+
+
+def battery() -> tuple[int, bool] | None:
+    """(percent, plugged in) — None on a desktop / when unknown."""
+    try:
+        import psutil
+        b = psutil.sensors_battery()
+        return (round(b.percent), bool(b.power_plugged)) if b else None
+    except Exception:
+        return None
+
+
+def power_reason(name: str, read=None) -> str:
+    """Why a task must not run now because of power ("" = fine). Checked per task: the laptop
+    can be unplugged in the middle of the night."""
+    if name not in HEAVY_TASKS:
+        return ""
+    read = read or battery          # looked up at call time (tests replace battery)
+    try:
+        floor = int(cfg().get("min_battery", DEFAULT_MIN_BATTERY))
+    except (TypeError, ValueError):
+        floor = DEFAULT_MIN_BATTERY
+    b = read()
+    if floor <= 0 or b is None or b[1]:
+        return ""
+    return f"on battery at {b[0]}% (below {floor}%) — skipped to save power" if b[0] < floor else ""
+
+
+def _close_browser() -> None:
+    """Research / leads / prospecting share the hidden browser: don't leave it running after the
+    night (~650 MB). Only touches it if a task actually imported it."""
+    import sys
+    mod = sys.modules.get(f"{__package__.rsplit('.', 1)[0]}.web.browser")
+    if mod is not None:
+        try:
+            mod.close_shared()
+        except Exception:
+            pass
 
 
 def _hm(s: str, default: str) -> tuple[int, int]:
@@ -397,6 +438,8 @@ def _run(key, ws, we, now, *, scheduled, only, wait, emit, stop, sleep) -> dict:
                 rec["stopped"] = stopped
             elif scheduled and datetime.now() >= we:
                 res, why = Result.skipped(f"the night window ended at {we:%H:%M} before it could start"), "window over"
+            elif (pw := power_reason(name)):
+                res, why = Result.skipped(pw), "power"
             else:
                 why = ""
                 log(f"{name}: start — {desc}")
@@ -419,6 +462,8 @@ def _run(key, ws, we, now, *, scheduled, only, wait, emit, stop, sleep) -> dict:
     except Exception as e:                       # the run itself broke: record it, loudly
         rec["status"] = "crashed"
         log(f"CRASHED: {type(e).__name__}: {e}")
+    finally:
+        _close_browser()
     rec["finished"] = datetime.now().isoformat(timespec="seconds")
     log(f"finish: {rec['status']}")
     try:
@@ -526,6 +571,10 @@ def status_text(now: datetime | None = None) -> str:
         steps, problems = plan(ws)
         lines.append("tasks: " + ", ".join(f"{n} {t:%H:%M}" for n, t in steps))
         lines += [f"config problem: {p}" for p in problems]
+        b = battery()
+        if b and not b[1]:
+            pw = power_reason("research", read=lambda: b)
+            lines.append(f"power: on battery at {b[0]}%" + (" — heavy tasks would be skipped right now" if pw else ""))
     for r in runs(3):
         tasks = r.get("tasks") or {}
         bad = sum(1 for t in tasks.values() if t["status"] == "failed")

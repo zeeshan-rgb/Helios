@@ -61,6 +61,14 @@ def _no_real_web(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_battery(monkeypatch):
+    """Night Mode skips heavy tasks on a low battery; tests must not depend on whether this laptop
+    happens to be unplugged. Tests of the power rule pass their own reader."""
+    from helios.night_mode import scheduler
+    monkeypatch.setattr(scheduler, "battery", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_agy(monkeypatch):
     """Tests never launch the real Antigravity CLI (slow, networked, uses the user's quota).
     A scripted stand-in (a .py 'bin', see test_antigravity's fake_agy) still works."""

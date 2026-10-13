@@ -451,8 +451,12 @@ def remember(text: str, category: str = "auto", project: str = "") -> str:
     """Save something the user wants you to remember (they say "remember that…", "note that…",
     "from now on…"). Write it as a short, self-contained statement about the user
     ("Prefers concise reports", not "I prefer…"). category: user | preferences | projects |
-    decisions | rules | skills | research | auto. Use `project` (e.g. "Maqsusi") for project facts.
-    Duplicates are merged; passwords, keys and other secrets are refused and must never be passed."""
+    decisions | rules | skills | research | leads (what you learned about a client/prospect) |
+    browsing (a SHORT summary of a browser session worth keeping: what was found, where) |
+    screen (a SHORT summary of screen context worth keeping — never raw screen text) | auto.
+    Browsing/screen notes are summaries under 600 characters and expire after 30 days.
+    Use `project` (e.g. "Maqsusi") for project facts. Duplicates are merged; passwords, keys,
+    card numbers, cookies and other secrets are refused and must never be passed."""
     from helios import memory_store
     source = _memory_source()
     # A background agent can't create standing rules/skills on its own: they wait for approval.
@@ -472,10 +476,14 @@ def remember(text: str, category: str = "auto", project: str = "") -> str:
 
 
 @mcp.tool()
-def recall_memory(query: str = "", category: str = "", project: str = "") -> str:
+def recall_memory(query: str = "", category: str = "", project: str = "", scope: str = "memory") -> str:
     """Search what the user has asked you to remember ("what do you remember about…?"). Empty
-    query = most recent items. Optional category / project filters."""
+    query = most recent items. Optional category / project filters. scope="all" ("what do you
+    know about X?") also searches the research library, freelance leads and local business
+    prospects — each in its own labelled group (research notes are not facts about the user)."""
     from helios import memory_store
+    if scope == "all" and (query or "").strip():
+        return memory_store.format_everywhere(memory_store.recall_everywhere(query))
     found = memory_store.recall(query, category or None, project or None, limit=10)
     return memory_store.format_items(found)
 
@@ -483,7 +491,7 @@ def recall_memory(query: str = "", category: str = "", project: str = "") -> str
 @mcp.tool()
 def list_memories(category: str = "") -> str:
     """List remembered items (optionally one category: user, preferences, projects, decisions,
-    rules, skills, research) so the user can inspect what you keep about them."""
+    rules, skills, research, leads, browsing, screen) so the user can inspect what you keep."""
     from helios import memory_store
     return memory_store.format_items(memory_store.items(category or None)[:50])
 
@@ -699,6 +707,47 @@ def find_ui_element(query: str, window: str = "", role: str = "") -> str:
         return controller.format_matches(ctx, matches, query)
     except Exception as e:
         return f"Couldn't search the UI ({e.__class__.__name__}: {e}) — use mcp__computer__get_window_state."
+
+
+def _app_voice() -> dict:
+    """The live voice state from the running app ({} when the app or voice isn't up)."""
+    try:
+        req = urllib.request.Request(conf.BASE_URL + "/dashboard/voice",
+                                     headers={"X-Auth-Token": conf.auth_token() or ""})
+        with urllib.request.urlopen(req, timeout=1.5) as r:
+            return json.loads(r.read() or b"{}")
+    except Exception:
+        return {}
+
+
+@mcp.tool()
+def perceive(window: str = "") -> str:
+    """EVERYTHING Helios can sense right now, in one fast text read: the foreground app/window (with
+    pid + window_id), whether it's your user's own browser and which page/URL it shows, the focused
+    control, any dialog or error, your hidden browser's open tabs, and the voice state. Call this
+    first when a request depends on context ("click Save", "what's this page about", "read me the
+    error"); use screen_context(detail='controls') when you need the full control list."""
+    from helios import orchestrator
+    try:
+        return orchestrator.format_perception(orchestrator.perceive(window, voice=_app_voice()))
+    except Exception as e:
+        return f"Couldn't perceive ({e.__class__.__name__}: {e}) — use screen_context."
+
+
+@mcp.tool()
+def locate(query: str, surface: str = "auto", window: str = "", role: str = "") -> str:
+    """Find a target by what it says ("Save", "Sign in", "File name") across every surface, best
+    first: your user's window via UI Automation (real elements) → your hidden browser's page (DOM
+    refs, when you're working a page there) → text on the screen image (OCR, last resort). Each match
+    gives the exact next call to act BY ELEMENT and how to verify. surface = auto | desktop | browser;
+    role narrows it ("button", "edit", "link"). Acting still goes through the normal approvals."""
+    from helios import orchestrator
+    surf = surface if surface in ("auto", "desktop", "browser") else "auto"
+    try:
+        ctx, matches = orchestrator.locate(query, surface=surf, window=window, role=role)
+        return orchestrator.format_matches(ctx, matches, query, surf)
+    except Exception as e:
+        return f"Couldn't search ({e.__class__.__name__}: {e}) — use find_ui_element or browser_snapshot."
 
 
 # ------------------------------------------------------------------ hidden browser (Playwright)

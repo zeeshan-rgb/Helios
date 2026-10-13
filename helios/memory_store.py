@@ -8,9 +8,17 @@ individually deletable in Obsidian:
     <vault>/Preferences/   how they like things done     <vault>/Rules/      standing rules
     <vault>/Projects/<P>/  facts about one project       <vault>/Skills/     how-tos that worked
     <vault>/Research/      findings (kept apart from stable memory)
+    <vault>/Lead Notes/    what was learned about clients / prospects (not the lead library itself)
+    <vault>/Browsing/      SUMMARIES of browser sessions (what was found where — never page dumps)
+    <vault>/Screen/        SUMMARIES of screen context worth keeping (never raw screen text/images)
 
+Browsing and Screen are episodic: capped at 600 characters, and pruned after EPISODIC_DAYS.
 Every item is timestamped, attributed to a source, deduplicated against its category, and never
 holds a secret (anything credential-shaped is refused, not just redacted).
+
+Memory layers (docs/HELIOS_MEMORY.md): short-term = the live conversation (the brain's session) +
+today's daily log; long-term = Profile/People/Projects notes + these items; knowledge kept apart =
+the research library, the lead library and the prospect database (recall_everywhere searches all).
 """
 
 from __future__ import annotations
@@ -25,11 +33,43 @@ from . import conf
 CATEGORIES = {
     "user": "User", "preferences": "Preferences", "projects": "Projects", "decisions": "Decisions",
     "rules": "Rules", "skills": "Skills", "research": "Research",
+    "leads": "Lead Notes", "browsing": "Browsing", "screen": "Screen",
 }
+EPISODIC = ("browsing", "screen")
+EPISODIC_DAYS = 30
+_EPISODIC_MAX = 600
 _DUP_JACCARD = 0.8
 _SECRET_HINT = re.compile(
     r"\b(pass(word|code|phrase)?|pin|otp|one[- ]time code|api[ _-]?key|secret|token|cvv|"
     r"card number|iban|account number|ssn|social security)\b\s*(is|was|=|:|-)\s*\S", re.I)
+# Credential shapes beyond the shared key/token pattern: credentials inside URLs / connection
+# strings, cookies and session ids, cloud account keys, SSH/PGP private material.
+_SECRET_EXTRA = re.compile(
+    r"([a-z][a-z0-9+.-]*://[^\s:/@]+:[^\s@/]+@"                 # scheme://user:pass@host
+    r"|\b(password|pwd)\s*=\s*[^;\s]+"                           # ...;Password=x; (conn strings)
+    r"|\baccountkey\s*=|\bsharedaccesssignature\b|\bsig=[A-Za-z0-9%]{20,}"
+    r"|\baws_secret_access_key\b|\"private_key(_id)?\"\s*:"
+    r"|\b(set-)?cookie\s*:|\b(session_?id|sessid|phpsessid|jsessionid)\s*[=:]\s*\S{8,}"
+    r"|-----BEGIN (OPENSSH|PGP|RSA|EC|DSA) )", re.I)
+_CARD = re.compile(r"\b(?:\d[ -]?){13,19}\b")
+
+
+def _luhn_ok(digits: str) -> bool:
+    total, alt = 0, False
+    for ch in reversed(digits):
+        d = int(ch)
+        if alt:
+            d = d * 2 - 9 if d > 4 else d * 2
+        total, alt = total + d, not alt
+    return total % 10 == 0
+
+
+def _has_card_number(text: str) -> bool:
+    for m in _CARD.finditer(text or ""):
+        digits = re.sub(r"\D", "", m.group(0))
+        if 13 <= len(digits) <= 19 and len(set(digits)) > 1 and _luhn_ok(digits):
+            return True
+    return False
 _RULE_HINT = re.compile(r"\b(always|never|must|don'?t|do not|require[sd]?|only ever)\b", re.I)
 _PREF_HINT = re.compile(r"\b(prefer|like|love|hate|dislike|want|favou?rite|rather)\b", re.I)
 _DECISION_HINT = re.compile(r"\b(decided|decision|we will|we'll|chose|going with|agreed)\b", re.I)
@@ -43,7 +83,9 @@ def vault() -> Path:
 
 def looks_secret(text: str) -> bool:
     from .memory import _SECRET_RE
-    return bool(_SECRET_RE.search(text or "") or _SECRET_HINT.search(text or ""))
+    t = text or ""
+    return bool(_SECRET_RE.search(t) or _SECRET_HINT.search(t) or _SECRET_EXTRA.search(t)
+                or _has_card_number(t))
 
 
 def classify(text: str) -> str:
@@ -193,6 +235,11 @@ def remember(text: str, category: str = "auto", *, source: str = "chat",
         category = "projects" if project else classify(text)
     if category == "projects" and not _safe_project(project or ""):
         project = "General"
+    if category in EPISODIC and len(text) > _EPISODIC_MAX:
+        return {"status": "refused", "item": None,
+                "reason": f"{category} notes are summaries — keep it under {_EPISODIC_MAX} characters"}
+    if category in EPISODIC:
+        prune_episodic()
     now = datetime.now().isoformat(timespec="seconds")
 
     def _do():
@@ -262,6 +309,75 @@ def set_status(item_id: str, status: str) -> dict | None:
     return target
 
 
+def prune_episodic(days: int = EPISODIC_DAYS, *, now: datetime | None = None) -> int:
+    """Delete browsing / screen summaries not refreshed for `days` days. Returns how many."""
+    from datetime import timedelta
+    cutoff = ((now or datetime.now()) - timedelta(days=days)).isoformat(timespec="seconds")
+    gone = 0
+    for cat in EPISODIC:
+        for it in items(cat):
+            if (it.get("updated") or it.get("created") or "") < cutoff:
+                try:
+                    Path(it["path"]).unlink(missing_ok=True)
+                    gone += 1
+                except OSError:
+                    pass
+    if gone:
+        conf.log("memory", f"pruned {gone} episodic note(s) older than {days} days")
+    return gone
+
+
+def recall_everywhere(query: str, limit: int = 6) -> dict:
+    """One search over everything Helios knows, kept in separate labelled groups: remembered
+    items, the research library, freelance leads and local business prospects."""
+    out: dict = {"memory": recall(query, limit=limit)}
+    q = _tokens(query)
+
+    def _hits(rows, fields):
+        scored = []
+        for r in rows:
+            hay = set().union(*(_tokens(str(r.get(f, ""))) for f in fields))
+            n = len(q & hay)
+            if n:
+                scored.append((n, r))
+        scored.sort(key=lambda x: -x[0])
+        return [r for _, r in scored[:limit]]
+    try:
+        from . import research
+        out["research"] = _hits(research.findings(limit=500), ("title", "summary", "topic"))
+    except Exception:
+        out["research"] = []
+    try:
+        from . import leads
+        out["leads"] = _hits(leads.all_leads(), ("title", "need", "service", "client", "location"))
+    except Exception:
+        out["leads"] = []
+    try:
+        from .prospecting import store
+        out["prospects"] = _hits(store.list_prospects(limit=500), ("name", "category", "area", "notes"))
+    except Exception:
+        out["prospects"] = []
+    return out
+
+
+def format_everywhere(found: dict) -> str:
+    parts = []
+    if found.get("memory"):
+        parts.append("REMEMBERED (about your user):\n" + format_items(found["memory"]))
+    if found.get("research"):
+        parts.append("RESEARCH LIBRARY (sourced notes, not facts about your user):\n" + "\n".join(
+            f"- {r['id']} [{r.get('topic', '')}] {r.get('title', '')} — {r.get('source_name', '')} {r.get('source_url', '')}"
+            for r in found["research"]))
+    if found.get("leads"):
+        parts.append("FREELANCE LEADS:\n" + "\n".join(
+            f"- {l['id']} [{l.get('status', '')}] {l.get('title', '')} — {l.get('source_url', '')}" for l in found["leads"]))
+    if found.get("prospects"):
+        parts.append("LOCAL BUSINESS PROSPECTS:\n" + "\n".join(
+            f"- #{p['id']} [{p['status']}] {p['name']} ({p.get('category', '')}, {(p.get('area') or '').split(',')[0]})"
+            for p in found["prospects"]))
+    return "\n\n".join(parts) or "Nothing found in memory, research, leads or prospects."
+
+
 def pending() -> list[dict]:
     return [it for it in items() if (it.get("status") or "active") == "pending"]
 
@@ -313,9 +429,14 @@ def digest_section(message: str) -> str:
         for it in [i for i in items(cat) if is_active(i)][:25]:
             lines.append(f"- [{cat[:-1]}] {it['text']}")
     seen = {l for l in lines}
-    for it in recall(message, limit=8):
+    episodic = 0
+    for it in recall(message, limit=10):
         if it["category"] in ("rules", "preferences"):
             continue
+        if it["category"] in EPISODIC:
+            episodic += 1
+            if episodic > 2:            # session/screen notes never crowd out stable memory
+                continue
         tag = f"project {it['project']}" if it["category"] == "projects" else it["category"]
         line = f"- [{tag}] {it['text']}"
         if line not in seen:

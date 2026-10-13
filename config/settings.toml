@@ -260,6 +260,8 @@ always_ask = []
 enabled = true
 start = "01:00"   # window start
 end = "05:00"     # hard end: no task starts after this
+min_battery = 30  # on battery below this %, the heavy tasks (checks, research, leads, prospecting) are
+                  # skipped and reported; plugged in = everything runs. 0 = never skip.
 
 [night_mode.schedule]
 # task = earliest start time. Delete a line to turn that task off.
@@ -300,6 +302,7 @@ speak_on_wake = true   # read the short version aloud the first time you wake He
 enabled = true
 read_only = false      # true = only the read tools (no save_memory / create_reminder / open_app / run_project_tests)
 disabled_tools = []    # e.g. ["open_app", "run_project_tests"]
+max_calls_per_minute = 30  # per tool, from outside clients — stops a looping agent (0 = no limit)
 
 [security]
 # Credential stores and secrets (SSH keys, password managers, browser credential stores, API
