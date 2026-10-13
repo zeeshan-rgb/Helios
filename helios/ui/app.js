@@ -68,9 +68,11 @@ function clearChat() {
   [...chat.querySelectorAll(".msg, .chip, .memnote, .usage, .turnact")].forEach(n => n.remove());
   if (emptyEl) emptyEl.classList.remove("hidden");
   current = null; act = null;
+  window.Dash?.onClear();
 }
 function bubble(kind, who) {
   if (emptyEl) emptyEl.classList.add("hidden");   // first message hides the empty state
+  window.Dash?.onBubble(kind);                    // the dashboard switches to the conversation
   const el = document.createElement("div");
   el.className = "msg " + kind;
   if (kind === "helios" || kind === "error") {
@@ -103,6 +105,7 @@ function setBusy(on, label) {
   // While the voice HUD is up it already shows the live state — don't double up with the banner.
   banner.classList.toggle("hidden", !on || voiceActive);
   if (label) bannerText.textContent = label;
+  window.Dash?.onBusy(on, label);
 }
 
 /* ==========================================================================
@@ -288,6 +291,7 @@ function setMic(on, live) {
   micbtn.setAttribute("aria-pressed", on ? "true" : "false");
   micbtn.title = on ? "Voice on — listening for claps / “hey Helios” (click to turn off; Sleep turns it back on)"
                     : "Voice off — Helios can't hear you or your claps (click to turn on)";
+  window.Dash?.onMic(on, live);
 }
 
 // --- YOLO (all-permissions) toggle --------------------------------------------------------
@@ -300,6 +304,7 @@ function setYolo(on) {
 }
 function handleVoice(data) {
   const state = (data && data.state) || "idle";
+  window.Dash?.onVoice(data || {});
   if (state === "off" || state === "disabled") {
     setMic(false, false); hideVoiceHud(0); voiceActive = false; setUiState(busy ? "thinking" : "idle"); return;
   }
@@ -470,13 +475,15 @@ ev.onerror = () => {
   ev._recover = setTimeout(() => {
     if (busy && ev.readyState !== 1) { setBusy(false); setUiState("idle"); }
   }, 6000);
+  window.Dash?.onConn(false);
 };
-ev.onopen = () => clearTimeout(ev._recover);
+ev.onopen = () => { clearTimeout(ev._recover); window.Dash?.onConn(true); };
 ev.onmessage = (e) => {
   let msg; try { msg = JSON.parse(e.data); } catch { return; }
   const { kind, data } = msg;
   if (kind === "model") {
     modelTag.textContent = data.model || "—";
+    window.Dash?.onModel(data.model || "");
     finishAct();                       // a fresh turn: close out any straggler strip
     current = bubble("helios", "Helios"); current.dataset.raw = "";
     setBusy(true, "Thinking…");
@@ -508,6 +515,7 @@ ev.onmessage = (e) => {
     bubble("error", "Helios").innerHTML = render(typeof data === "string" ? data : JSON.stringify(data));
     finishAct();
     current = null; setBusy(false);
+    window.Dash?.onError(typeof data === "string" ? data : JSON.stringify(data));
     if (!voiceActive) setUiState("error");
     clearTimeout(ev._errCalm); ev._errCalm = setTimeout(() => { if (!busy) setUiState("idle"); }, 1800);
   } else if (kind === "permission") {
@@ -526,6 +534,8 @@ ev.onmessage = (e) => {
     setYolo(data && data.on);   // server-driven (toggle elsewhere, or reset on new-chat/panic)
   } else if (kind === "model3d") {
     model3dCard(data);          // tool `show` -> chat card with render PNG + viewer button
+  } else if (kind === "dashboard") {
+    window.Dash?.onEvent(data);  // a quick action finished (Night Mode / project checks)
   }
 };
 
@@ -674,12 +684,12 @@ document.querySelectorAll("#empty .ex").forEach(b => b.addEventListener("click",
   input.value = b.textContent; input.focus();
   input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 180) + "px";
 }));
-// Time-aware greeting.
+// Time-aware greeting (the dashboard hero; dashboard.js fills in the rest of the hero).
 (() => {
   const h = new Date().getHours();
   const part = h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   const el = g("greet");
-  if (el) el.textContent = `${part}, sir. How can I help?`;
+  if (el) el.textContent = `${part}, sir`;
 })();
 // Custom window controls (frameless window has no native title bar): minimize -> taskbar,
 // close -> hide back to the orb. The native app drives the window via these endpoints.
@@ -752,7 +762,7 @@ function setDrawerBack(fn) { drawerBackFn = fn || null; dback.classList.toggle("
 function setDrawerTitle(t) { dtitle.textContent = t; }
 function openDrawer(view, title) {
   drawerView = view;
-  ["histview", "missionview", "wfview", "setview", "modelview", "prview"].forEach(v =>
+  ["histview", "missionview", "wfview", "setview", "modelview", "prview", "infoview"].forEach(v =>
     g(v).classList.toggle("hidden", v !== view));
   setDrawerTitle(title);
   setDrawerBack(null);

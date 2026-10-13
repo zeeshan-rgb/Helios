@@ -135,9 +135,13 @@ class VoiceDaemon:
         self.tts.on_speaking(self._on_speaking)
 
     # ------------------------------------------------------------------ UI / lifecycle
+    def _wake_fields(self) -> dict:
+        """Wake-word readiness for the dashboard (the daemon is the only one that knows)."""
+        return {"wake": self.wake.model_key or "", "wake_reason": self.wake.disabled_reason}
+
     def _set_state(self, state: str, **fields):
         self._state = state
-        self.bridge.post_voice_state(state, **fields)
+        self.bridge.post_voice_state(state, **{**self._wake_fields(), **fields})
 
     def _on_speaking(self, speaking: bool):
         """Speaker callback: mute the mic while talking (echo guard), surface speaking state, and
@@ -859,8 +863,8 @@ class VoiceDaemon:
 
             # LISTENING (after wake) / FOLLOWUP (hot mic) capture. A barge capture is hot-mic but
             # gets the full listen window (the user just interrupted — give him time to state the command).
-            self._set_state("listening")
             explicit = barge_capture or not in_followup   # wake word / clap / talk key, not a hot mic
+            self._set_state("listening", followup=not explicit)
             start_timeout = self.listen_sec if explicit else self.followup_sec
             if explicit:
                 conf.log("voice", f"listening (up to {start_timeout:.0f}s for speech to start)")
@@ -990,10 +994,11 @@ class VoiceDaemon:
         if self.dormant:
             conf.log("voice", "voice daemon started (dormant — listening for the wake gesture)")
         elif self.muted:
-            self.bridge.post_voice_state("off")
+            self.bridge.post_voice_state("off", **self._wake_fields())
             conf.log("voice", "voice daemon started muted (a double-clap turns the mic on)")
         else:
-            self.bridge.post_voice_state("idle")  # tell the UI voice is live (mic button lights up)
+            # tell the UI voice is live (mic button lights up)
+            self.bridge.post_voice_state("idle", **self._wake_fields())
             conf.log("voice", "voice daemon started")
         try:
             self._main_loop()
