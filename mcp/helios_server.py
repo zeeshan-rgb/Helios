@@ -717,6 +717,90 @@ def _browser_call(fn):
         return f"Browser error ({e.__class__.__name__}: {str(e).splitlines()[0][:200] if str(e) else ''})"
 
 
+# ------------------------------------------------------------------ business prospecting
+
+@mcp.tool()
+def prospects_list(status: str = "", priority: str = "", area: str = "", limit: int = 10) -> str:
+    """Local business prospects ("show me the best 10 leads", "what needs approval?" → status
+    DRAFTED): each with website score, AI-opportunity score, package and quote from the user's rate
+    card. status: NEW | RESEARCHED | QUALIFIED | DRAFTED | APPROVED | CONTACTED | ... ; priority A|B|C."""
+    from helios.prospecting import engine, store
+    return engine.format_list(store.list_prospects(status=status or None, priority=priority or None,
+                                                   area=area or None, limit=max(1, min(int(limit), 40))))
+
+
+@mcp.tool()
+def prospect_details(prospect_id: int) -> str:
+    """One prospect in full: source (OpenStreetMap link), website audit findings, the reasons behind
+    each score, recommended package, quotation (or NEEDS USER PRICING), the outreach draft with the
+    evidence for every claim, and its history."""
+    from helios.prospecting import engine, store
+    p = store.get(prospect_id)
+    return engine.format_prospect(p, verbose=True) if p else "No such prospect."
+
+
+@mcp.tool()
+def prospects_run(area: str = "", research: int = 8) -> str:
+    """Find and research local businesses ("find businesses in Mehdipatnam that need websites",
+    "scan the configured areas"): searches OpenStreetMap (never Google Maps) in the area's next
+    cells, audits websites, scores, quotes from the rate card and drafts outreach for approval.
+    Takes a few minutes. Research and drafting only — nothing is ever sent."""
+    from helios.prospecting import engine
+    rep = engine.run(area=area or None, max_research=max(0, min(int(research), 30)))
+    lines = [f"{s['area']}: searched OpenStreetMap in {s['cells_scanned']} cell(s) — {s['candidates']} businesses, "
+             f"{s['new']} new" for s in rep["scans"]]
+    lines.append(f"Researched {rep['researched']}: {rep['qualified']} qualified, {rep['drafted']} drafts waiting "
+                 f"for approval ({rep['seconds']}s). OpenStreetMap doesn't list every business.")
+    lines += [f"! {e}" for e in rep["errors"][:5]]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def prospect_audit(url: str, category: str = "") -> str:
+    """Audit any business website now ("audit this business's website"): HTTPS, speed, mobile
+    layout, contact routes, booking/ordering/WhatsApp, reviews, SEO basics — with the website
+    score, AI-opportunity score and reasons. Read-only."""
+    from helios.prospecting import audit, scoring
+    p = {"name": url, "website": url, "category": category}
+    p.update(audit.audit_prospect(p))
+    sc = scoring.score(p)
+    out = [f"{url}: {p.get('website_status')} · website {sc['website_score']}/5 · AI {sc['ai_score']}/5 · "
+           f"{sc['reasons']['package']}"]
+    out += [f"- {r['factor']}: {r['detail']}" for k in ("website", "ai") for r in sc["reasons"][k]]
+    return "\n".join(out)
+
+
+@mcp.tool()
+def prospect_approve(prospect_id: int) -> str:
+    """Approve a DRAFTED prospect's outreach email + quotation — only when your user explicitly says
+    to approve that one (they confirm). Approving sends NOTHING; they send it themselves."""
+    from helios.prospecting import store
+    try:
+        p = store.approve(prospect_id, by="you (via Helios, approved at the prompt)")
+    except store.StatusError as e:
+        return str(e)
+    return (f"Approved #{p['id']} {p['name']}. Nothing was sent — they can put it in Gmail drafts with "
+            f"`helios prospects gmail {p['id']}` or send it themselves, then `helios prospects sent {p['id']}`.")
+
+
+@mcp.tool()
+def prospect_set_status(prospect_id: int, status: str) -> str:
+    """Record what happened: REJECTED / ARCHIVED (drop it), or after contact REPLIED / INTERESTED /
+    NOT_INTERESTED / CLOSED. (APPROVED and CONTACTED can't be set here.)"""
+    from helios.prospecting import engine, store
+    try:
+        return engine.format_prospect(store.set_status(prospect_id, status))
+    except store.StatusError as e:
+        return str(e)
+
+
+@mcp.tool()
+def prospects_coverage(area: str = "") -> str:
+    """Which areas/cells have been searched, how many businesses and qualified prospects each gave."""
+    from helios.prospecting import engine, store
+    return engine.format_coverage(store.coverage(area or None))
+
+
 @mcp.tool()
 def web_extract(url: str, render: str = "auto", fresh: bool = False) -> str:
     """Read one web page as CLEAN content with provenance: title, site, author, estimated date,

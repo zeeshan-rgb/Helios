@@ -752,7 +752,7 @@ function setDrawerBack(fn) { drawerBackFn = fn || null; dback.classList.toggle("
 function setDrawerTitle(t) { dtitle.textContent = t; }
 function openDrawer(view, title) {
   drawerView = view;
-  ["histview", "missionview", "wfview", "setview", "modelview"].forEach(v =>
+  ["histview", "missionview", "wfview", "setview", "modelview", "prview"].forEach(v =>
     g(v).classList.toggle("hidden", v !== view));
   setDrawerTitle(title);
   setDrawerBack(null);
@@ -1004,6 +1004,83 @@ const WF_TYPES = ["agent", "brain", "notify", "http", "delay", "condition"];
 const WF_AGENTS = ["auto", "researcher", "operator", "coder", "organizer", "writer"];
 
 g("workflowbtn").addEventListener("click", () => { openDrawer("wfview", "Workflows"); openWfList(); });
+
+// ---- Business prospects: the approval queue (nothing is ever sent from here) ----
+let prFilter = "queue";
+g("prospectbtn").addEventListener("click", () => { openDrawer("prview", "Business prospects"); loadProspects(); });
+document.querySelectorAll("#prtabs .prtab").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#prtabs .prtab").forEach(x => x.classList.toggle("on", x === b));
+  prFilter = b.dataset.f; loadProspects();
+}));
+function prRow(label, value, cls) {
+  return value == null || value === "" ? "" :
+    `<div class="prrow"><span>${esc(label)}</span><b class="${cls || ""}">${esc(String(value))}</b></div>`;
+}
+function prCard(p) {
+  const el = document.createElement("div");
+  el.className = "prcard";
+  const ws = p.website_score == null ? `? (${p.website_status})` : `${p.website_score}/5 · ${p.website_status}`;
+  const aiCls = p.ai_score >= 3 ? "good" : p.ai_score >= 2 ? "mid" : "";
+  const priced = p.price && !p.price.startsWith("NEEDS");
+  const canAct = ["DRAFTED", "QUALIFIED", "RESEARCHED", "NEW"].includes(p.status);
+  const reasons = p.reasons.map(r => `<li><b>${esc(r.factor)}</b> — ${esc(r.detail)}</li>`).join("");
+  const claims = (p.draft.claims || []).map(c => `<li>${esc(c.text)} <span class="muted">← ${esc(c.evidence)}</span></li>`).join("");
+  el.innerHTML =
+    `<div class="prhead"><span class="prname">${esc(p.name)}</span>` +
+    `<span class="wftag">${esc(p.status)}</span>${p.priority ? `<span class="prprio p${esc(p.priority)}">${esc(p.priority)}</span>` : ""}</div>` +
+    `<div class="muted small">${esc(p.category)} · ${esc(p.area)}</div>` +
+    `<div class="prgrid">` + prRow("Website", ws) + prRow("Mobile", p.mobile, p.mobile === "Poor" ? "bad" : "") +
+      prRow("Booking", p.booking, p.booking === "Missing" ? "bad" : "") + prRow("WhatsApp", p.whatsapp, p.whatsapp === "Missing" ? "bad" : "") +
+      prRow("AI opportunity", `${p.ai_score}/5`, aiCls) + prRow("Recommended", p.package) +
+      prRow("Quote", priced ? `${p.price} · ${p.timeline}` : (p.price ? "Needs your pricing" : ""), priced ? "" : "bad") +
+      `</div>` +
+    `<div class="muted small prsrc">Source: <a href="${esc(p.source_url)}" target="_blank" rel="noopener">${esc(p.source_name)}</a>` +
+      (p.website ? ` · <a href="${esc(p.website)}" target="_blank" rel="noopener">website</a>` : "") + `</div>` +
+    `<div class="pract">` +
+      `<button class="ghost" data-a="audit">View audit</button>` +
+      (p.draft.body ? `<button class="ghost" data-a="draft">${p.draft.channel === "phone" ? "Call notes" : "Draft"}</button>` : "") +
+      (p.status === "DRAFTED" ? `<button class="primary" data-a="approve">Approve</button>` : "") +
+      (canAct ? `<button class="ghost" data-a="reject">Reject</button><button class="ghost" data-a="archive">Archive</button>` : "") +
+    `</div>` +
+    `<div class="prmore hidden" data-p="audit"><ul>${reasons || "<li>No findings yet.</li>"}</ul>` +
+      `<div class="muted small">${esc(p.priority_reason || "")}</div></div>` +
+    `<div class="prmore hidden" data-p="draft">` +
+      (p.draft.channel === "phone" ? "" : `<div class="small"><b>To:</b> ${esc(p.draft.to)} <span class="muted">(${esc(p.draft.to_source)})</span><br><b>Subject:</b> ${esc(p.draft.subject)}</div>`) +
+      `<pre class="prdraft">${esc(p.draft.body)}</pre>` +
+      (claims ? `<div class="small"><b>Evidence for each claim</b><ul>${claims}</ul></div>` : "") + `</div>`;
+  el.querySelectorAll("[data-a]").forEach(btn => btn.addEventListener("click", async () => {
+    const a = btn.dataset.a;
+    if (a === "audit" || a === "draft") {
+      el.querySelectorAll(".prmore").forEach(m => m.classList.toggle("hidden", m.dataset.p !== a || !m.classList.contains("hidden")));
+      return;
+    }
+    if (a === "approve" && !confirm(`Approve the ${p.draft.channel === "phone" ? "call notes" : "email"} for ${p.name}?\n\n` +
+        "Nothing is sent — you send it (or call) yourself, then mark it contacted.")) return;
+    try {
+      const r = await jfetch("/prospects/action", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: p.id, action: a }) });
+      const j = await r.json();
+      if (!r.ok) { alert(j.error || "Couldn't do that."); return; }
+    } catch { alert("Couldn't reach Helios."); return; }
+    loadProspects();
+  }));
+  return el;
+}
+async function loadProspects() {
+  const list = g("prlist");
+  let data = { items: [], counts: {} };
+  try { data = await (await jfetch("/prospects?status=" + encodeURIComponent(prFilter))).json(); } catch {}
+  const n = (data.counts || {}).DRAFTED || 0;
+  const q = document.querySelector('#prtabs [data-f="queue"]');
+  if (q) q.textContent = n ? `To approve (${n})` : "To approve";
+  if (!data.items.length) {
+    list.innerHTML = '<div class="muted small" style="padding:12px 2px">Nothing here yet. Set areas under ' +
+      '<b>[prospecting]</b> in settings, or say <b>“Helios, find salons in Mehdipatnam that need websites.”</b></div>';
+    return;
+  }
+  list.innerHTML = "";
+  data.items.forEach(p => list.appendChild(prCard(p)));
+}
 g("wfnew").addEventListener("click", () => openWfEditor(null, null));
 
 function stopWfPoll() { if (wfPollTimer) { clearInterval(wfPollTimer); wfPollTimer = null; } }

@@ -63,6 +63,7 @@ _HELIOS_ASK = {
     "gmail_send_draft",     # sends an email to a real person — only with the user's yes
     "gmail_add_business_contact",   # widens who Helios drafts replies for
     "browser_download",     # saves a file from the web (hidden browser sandbox)
+    "prospect_approve",     # approves outreach to a business — the user's explicit yes
 }
 # Helios's own tools that contact a real person (blocked outright for background agents).
 _HELIOS_OUTBOUND = {"gmail_send_draft"}

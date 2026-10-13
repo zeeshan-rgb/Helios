@@ -948,3 +948,31 @@ html.materializing #holo .scan { animation: helios-scan .42s cubic-bezier(.3,.1,
   margin: 8px 0 6px;
 }
 .m3dcard .m3dopen { margin-top: 10px; }
+
+/* ---- Business prospects (approval queue) ---- */
+.prtabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
+.prtab { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px;
+         padding: 4px 11px; font-size: 12px; cursor: pointer; }
+.prtab.on { background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent-dim); }
+.prcard { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px;
+          margin-bottom: 10px; box-shadow: inset 0 1px 0 var(--line-hi); }
+.prhead { display: flex; align-items: center; gap: 8px; }
+.prname { font-weight: 600; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prprio { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 1px 7px; border: 1px solid var(--line); }
+.prprio.pA { color: var(--accent-2); border-color: var(--accent-dim); background: var(--accent-soft); }
+.prprio.pC { color: var(--muted); }
+.prgrid { display: grid; grid-template-columns: 1fr; gap: 3px; margin: 9px 0 6px; font-size: 12.5px; }
+.prrow { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dashed var(--line-soft); padding: 2px 0; }
+.prrow span { color: var(--muted); }
+.prrow b { font-weight: 500; text-align: right; }
+.prrow b.bad { color: #e88fa0; }
+.prrow b.good { color: var(--accent-2); }
+.prrow b.mid { color: #e6c46a; }
+.prsrc a { color: var(--accent); text-decoration: none; }
+.pract { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.pract button { font-size: 12px; padding: 5px 11px; border-radius: 8px; }
+.prmore { margin-top: 9px; font-size: 12.5px; }
+.prmore ul { margin: 4px 0 6px 16px; padding: 0; }
+.prmore li { margin: 3px 0; }
+.prdraft { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line-soft); border-radius: 8px;
+           padding: 9px 10px; font: 12.5px/1.5 inherit; margin: 6px 0; max-height: 280px; overflow: auto; }

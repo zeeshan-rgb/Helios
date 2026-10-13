@@ -760,6 +760,104 @@ def cmd_gmail(args) -> int:
     return 0
 
 
+def cmd_prospects(args) -> int:
+    """Business prospecting: `helios prospects [list [STATUS|A|B|C] | show <id> | run [area] |
+    scan <area> | research <id> | audit <url> | approve <id> | reject <id> | archive <id> |
+    gmail <id> | sent <id> | status <id> REPLIED|INTERESTED|NOT_INTERESTED|CLOSED | sync |
+    coverage]`. Helios researches and drafts; YOU approve and send."""
+    _conf()
+    from helios.prospecting import engine, outreach, store
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "list"
+
+    def pid() -> int:
+        if not args or not args[0].lstrip("#").isdigit():
+            raise store.StatusError("give a prospect number, e.g. `helios prospects show 12`")
+        return int(args[0].lstrip("#"))
+    try:
+        if action == "list":
+            f = args[0].upper() if args else ""
+            kw = {"priority": f} if f in ("A", "B", "C") else ({"status": f} if f else {})
+            print(engine.format_list(store.list_prospects(limit=40, **kw)))
+        elif action == "show":
+            p = store.get(pid())
+            print(engine.format_prospect(p, verbose=True) if p else "No such prospect.")
+        elif action in ("run", "scan"):
+            area = " ".join(args) or None
+            print("Searching OpenStreetMap and auditing websites (a few minutes)...")
+            rep = engine.run(area=area, max_research=0 if action == "scan" else None)
+            for s in rep["scans"]:
+                print(f"  {s['area']}: {s['cells_scanned']} cell(s), {s['candidates']} businesses, {s['new']} new")
+            print(f"  researched {rep['researched']}, qualified {rep['qualified']}, drafted {rep['drafted']} "
+                  f"({rep['seconds']}s)")
+            for e in rep["errors"][:5]:
+                print(f"  ! {e}")
+            if not rep["scans"] and not area:
+                print("  (no areas configured — add [prospecting] areas in settings.toml, or give one: "
+                      "helios prospects run \"Mehdipatnam, Hyderabad\")")
+        elif action == "research":
+            print(engine.format_prospect(engine.research(pid()), verbose=True))
+        elif action == "audit" and args:
+            from helios.prospecting import audit, scoring
+            fake = {"name": args[0], "website": args[0], "category": args[1] if len(args) > 1 else ""}
+            fake.update(audit.audit_prospect(fake))
+            sc = scoring.score(fake)
+            print(f"{fake.get('website_status')} · website {sc['website_score']}/5 · AI {sc['ai_score']}/5 · "
+                  f"{sc['reasons']['package']}")
+            for k in ("website", "ai"):
+                for r in sc["reasons"][k]:
+                    print(f"  - {r['factor']}: {r['detail']}")
+        elif action == "approve":
+            p = store.get(pid())
+            if not p:
+                raise store.StatusError("no such prospect")
+            print(engine.format_prospect(p, verbose=True))
+            d = p.get("draft") or {}
+            how = "email to" if d.get("channel", "email") == "email" else "call notes for"
+            if input(f"\nApprove this outreach ({how} {d.get('to') or 'no contact'})? Nothing is sent now. [y/N] "
+                     ).strip().lower() not in ("y", "yes"):
+                print("Not approved.")
+                return 0
+            store.approve(p["id"], by="you (CLI)")
+            print("Approved. Next: `helios prospects gmail {0}` puts it in your Gmail drafts, or copy it and "
+                  "send it yourself — then `helios prospects sent {0}`.".format(p["id"]))
+        elif action in ("reject", "archive"):
+            print(engine.format_prospect(store.set_status(pid(), action.upper() + "ED" if action == "reject" else "ARCHIVED")))
+        elif action == "gmail":
+            d = outreach.to_gmail_draft(pid())
+            print(f"In your Gmail drafts (to {d['to']}). Send it from Gmail; Helios notices it in Sent mail "
+                  "(`helios prospects sync`).")
+        elif action == "sent":
+            p = store.get(pid())
+            if not p:
+                raise store.StatusError("no such prospect")
+            d = p.get("draft") or {}
+            channel = d.get("channel", "email")
+            verb = "sent the approved email to" if channel == "email" else "called / contacted"
+            if input(f"Confirm YOU {verb} {d.get('to') or p.get('email') or p.get('phone')}? [y/N] "
+                     ).strip().lower() not in ("y", "yes"):
+                print("Not recorded.")
+                return 0
+            store.record_contact(p["id"], channel=f"{channel} (by you)",
+                                 evidence=f"confirmed by you in the CLI at {store.now()}", by="you (CLI)")
+            print("Recorded as CONTACTED.")
+        elif action == "status" and len(args) >= 2:
+            print(engine.format_prospect(store.set_status(pid(), args[1])))
+        elif action == "sync":
+            done = outreach.sync_sent()
+            print(f"{len(done)} approved email(s) found in your Sent mail → CONTACTED." if done
+                  else "Nothing new in Sent mail (or Gmail isn't connected).")
+        elif action == "coverage":
+            print(engine.format_coverage(store.coverage(" ".join(args) or None)))
+        else:
+            print(cmd_prospects.__doc__.split(":", 1)[1].strip())
+            return 2
+    except store.StatusError as e:
+        print(e)
+        return 1
+    return 0
+
+
 def cmd_security(args) -> int:
     """Security self-check: `helios security` — is every protection in place? Read-only."""
     _conf()
@@ -894,6 +992,7 @@ _COMMANDS = {
     "usage": cmd_usage,
     "polarion": cmd_polarion,
     "gmail": cmd_gmail,
+    "prospects": cmd_prospects,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -919,6 +1018,7 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  usage         AI tokens used per day and what for\n"
           "  polarion      read-only Polarion (local + server): status / token / projects / search / item\n"
           "  gmail         Gmail: setup / login / business contacts / inbox / reply drafts / send\n"
+          "  prospects     local businesses needing a website/AI: run / list / show / approve / sent / coverage\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 
