@@ -211,6 +211,19 @@ talk_hotkey = "<ctrl>+<alt>+h"        # talk to Helios: same as saying "hey Heli
 listen_sec = 8             # after a wake word / clap / talk key: seconds to wait for you to start
 muted = false
 
+[voice.stt]
+# Speech-to-text (faster-whisper). These override the older flat stt_* keys above, which still work.
+# Measured on this laptop (tools/bench_stt.py, 32 clips, clean + noisy): base.en ~1.1 s per command,
+# as accurate as small.en and steadier than tiny.en in noise; small.en / distil-small.en are ~3x
+# slower with no real gain. Your project names are added to the vocabulary automatically
+# (base.en: word errors 5.2% -> 2.8%, "Maqsusi"/"Polarion" right 8/8 instead of 4/8).
+model = "base.en"            # tiny.en | base.en | small.en | distil-small.en | base / small (multilingual)
+device = "auto"              # auto = CUDA GPU if present, else CPU (falls back to CPU if the GPU fails)
+compute_type = "auto"        # auto = int8 on CPU, float16 on CUDA
+language = "en"              # en | auto (detect — needs a multilingual model, not *.en) | hi, fr, ...
+beam_size = 1                # 1 = greedy, fastest; higher = slower, rarely better for short commands
+vocabulary = []              # extra words Whisper should know, e.g. ["Acme", "LiveDoc"]
+
 [server]
 host = "127.0.0.1"
 port = 8769

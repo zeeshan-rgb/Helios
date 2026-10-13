@@ -42,6 +42,16 @@ CLAUDE_BIN: str = ""   # assigned below, once SETTINGS is available
 
 LOGS_DIR.mkdir(parents=True, exist_ok=True)  # ensure logs/ exists before log() is ever called
 
+# Model downloads (Whisper, RealtimeSTT's live-text model, ...) go to the Helios cache next to the
+# data folder (D:\Helios\cache\hf here) even when Helios starts without the HF_HOME environment
+# variable — C: is nearly full on this machine. An explicit HF_HOME always wins.
+try:
+    _hf = DATA_DIR.resolve().parent / "cache" / "hf"
+    if "HF_HOME" not in os.environ and _hf.is_dir():
+        os.environ["HF_HOME"] = str(_hf)
+except OSError:
+    pass
+
 # Version is read from a plain-text VERSION file at the repo root (single source of truth,
 # shared with the UI); fall back to 0.0.0 if it's missing or unreadable.
 try:
