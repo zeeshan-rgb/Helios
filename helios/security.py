@@ -134,9 +134,24 @@ def _check_settings_secrets() -> tuple[str, str]:
     return "ok", "no tokens or keys in settings.toml"
 
 
+_DESTRUCTIVE_PROBES = ("Format-Volume -DriveLetter E", "Remove-Item -Recurse C:/x", "find . -delete",
+                       "wmic useraccount where name='x' delete", "git branch -D main", "git push --force",
+                       "git remote remove origin")
+
+
+def _check_destructive_shell() -> tuple[str, str]:
+    """Destructive shell commands must never be auto-allowed by the read-only allowlist."""
+    from . import permissions
+    leaked = [c for c in _DESTRUCTIVE_PROBES if permissions.classify("PowerShell", {"command": c}) != "ask"]
+    if leaked:
+        return "fail", "auto-allowed without asking: " + "; ".join(leaked)
+    return "ok", f"{len(_DESTRUCTIVE_PROBES)} destructive command shapes all need your approval"
+
+
 def self_check() -> list[tuple[str, str, str]]:
     checks: list[tuple[str, str, str]] = []
-    for name, fn in (("permission gate", _check_gate), ("internal MCP server", _check_internal_mcp),
+    for name, fn in (("permission gate", _check_gate), ("destructive commands", _check_destructive_shell),
+                     ("internal MCP server", _check_internal_mcp),
                      ("public MCP server", _check_public_mcp), ("protected paths", _check_protected),
                      ("Night Mode allowlist", _check_night_allowlist), ("git hygiene", _check_gitignore),
                      ("secrets in logs", _check_logs), ("secrets in settings", _check_settings_secrets)):

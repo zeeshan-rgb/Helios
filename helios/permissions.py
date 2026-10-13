@@ -183,13 +183,21 @@ def is_internal_url(url: str) -> bool:
 _SHELL_CHAIN = re.compile(r"[;&|\n\r`<>]|\$\(")
 # Shell commands that just read/report -> autonomous.
 _SHELL_READ = re.compile(
-    r"^\s*\(?\s*(get-(?!.*\|.*set)\w+|select-?\w*|where-object|measure-\w+|format-\w+|"
+    r"^\s*\(?\s*(get-(?!.*\|.*set)\w+|select-?\w*|where-object|measure-\w+|"
+    r"format-(table|list|wide|custom|hex)|"
     r"out-(string|host)|sort-object|group-object|compare-object|resolve-path|test-path|"
     r"gci|gc\b|ls\b|dir\b|cat\b|type\b|echo\b|write-output|tasklist|systeminfo|whoami|"
     r"hostname|ipconfig|ping|nslookup|tracert|gwmi|get-wmiobject|wmic|find\b|findstr|"
     r"git (status|log|diff|show|branch|remote)|python --version|node --version)\b",
     re.I,
 )
+# Read-looking commands that can still change or destroy things through an argument:
+# `find -delete / -exec`, `wmic ... delete|call|set|create`, `git branch -D`, `git remote remove`.
+_SHELL_READ_UNSAFE = re.compile(
+    r"(^\s*find\b.*\s-(delete|exec|execdir|ok|okdir|fprint\w*)\b"
+    r"|^\s*wmic\b.*\b(delete|call|set|create|terminate|uninstall)\b"
+    r"|^\s*git\s+branch\b.*\s(-[a-z]*[dDmMcCf]|--(delete|move|copy|force|set-upstream\w*|unset-upstream|edit-description))\b"
+    r"|^\s*git\s+remote\s+(add|remove|rm|rename|set-\w+|prune|update)\b)", re.I)
 # Low-risk system-setting changes the user allowed (audio/wifi/display).
 _SHELL_SAFE_SET = re.compile(
     r"(set-audiodevice|audiodevicecmdlets|nircmd.*(setsysvolume|mutesysvolume|setdefaultsounddevice|setbrightness)|"
@@ -288,7 +296,7 @@ def classify(tool_name: str, tool_input: dict | None) -> str:
             return "ask"
         if _SHELL_SAFE_SET.search(cmd):
             return "allow"
-        if _SHELL_READ.search(cmd):
+        if _SHELL_READ.search(cmd) and not _SHELL_READ_UNSAFE.search(cmd):
             return "allow"
         return "ask"
     # connected apps (Composio) — allow ONLY clearly read-only actions; sends/writes and any

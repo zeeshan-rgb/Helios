@@ -46,14 +46,37 @@ TOOLS = {
     "get_morning_report": ("mcp__helios__morning_briefing", "read"),
     "search_research": ("mcp__helios__research_findings", "read"),
     "safe_diagnostic": ("mcp__helios__system_health", "read"),
+    "get_capabilities": ("mcp__helios__mcp_capabilities", "read"),
+    "get_night_mode_status": ("mcp__helios__night_mode_status", "read"),
     "save_memory": ("mcp__helios__remember", "write"),
     "create_reminder": ("mcp__helios__set_reminder", "write"),
     "open_app": ("mcp__helios__open_app", "action"),
     "run_project_tests": ("mcp__helios__run_project_checks", "action"),
 }
 _MAX_OUT = 12000
+DEFAULT_RATE = 30          # calls per tool per minute from outside clients (a looping agent stops here)
 
 _policy = None
+_calls: dict[str, list[float]] = {}
+
+
+def _rate_limited(tool: str, now: float | None = None) -> str:
+    """Sliding one-minute window per tool. "" = fine, else why it's refused."""
+    import time
+    now = time.monotonic() if now is None else now
+    try:
+        cap = int(cfg().get("max_calls_per_minute", DEFAULT_RATE))
+    except (TypeError, ValueError):
+        cap = DEFAULT_RATE
+    if cap <= 0:
+        return ""
+    hits = [t for t in _calls.get(tool, []) if now - t < 60]
+    if len(hits) >= cap:
+        _calls[tool] = hits
+        return f"{tool} was called {cap} times in the last minute — slow down ([mcp_public] max_calls_per_minute)"
+    hits.append(now)
+    _calls[tool] = hits
+    return ""
 
 
 def _load_policy():
@@ -88,6 +111,8 @@ def _guard(tool: str, args: dict) -> str | None:
         why = f"{tool} is disabled in [mcp_public] disabled_tools"
     elif c.get("read_only", False) and kind != "read":
         why = f"the server is read-only ([mcp_public] read_only = true) — {tool} changes things"
+    elif (rl := _rate_limited(tool)):
+        why = rl
     if why is None:
         try:
             decision, reason = _load_policy().decide(internal, dict(args), "mcp-public")
@@ -168,14 +193,16 @@ def get_project_changes(project: str = "", hours: float = 24) -> str:
 def search_memory(query: str, category: str = "") -> str:
     """Search what the user asked Helios to remember (active items only; pending lessons and
     secrets are never included). category: user, preferences, projects, decisions, rules,
-    skills, research."""
+    skills, research, leads. (Browser-session and screen notes stay private to Helios.)"""
     if (r := _guard("search_memory", {"query": query, "category": category})):
         return r
     from helios import memory_store
+    shared = [c for c in memory_store.CATEGORIES if c not in memory_store.EPISODIC]
     cat = category.strip().lower() or None
-    if cat and cat not in memory_store.CATEGORIES:
-        return f"Unknown category. Use one of: {', '.join(memory_store.CATEGORIES)}"
-    return _cap(memory_store.format_items(memory_store.recall(query, cat, limit=15)))
+    if cat and cat not in shared:
+        return f"Unknown category. Use one of: {', '.join(shared)}"
+    found = [it for it in memory_store.recall(query, cat, limit=30) if it["category"] not in memory_store.EPISODIC]
+    return _cap(memory_store.format_items(found[:15]))
 
 
 @mcp.tool()
@@ -184,7 +211,9 @@ def get_recent_memory(limit: int = 15) -> str:
     if (r := _guard("get_recent_memory", {"limit": limit})):
         return r
     from helios import memory_store
-    return _cap(memory_store.format_items(memory_store.recall("", limit=max(1, min(int(limit), 50)))))
+    n = max(1, min(int(limit), 50))
+    found = [it for it in memory_store.recall("", limit=n * 2) if it["category"] not in memory_store.EPISODIC]
+    return _cap(memory_store.format_items(found[:n]))
 
 
 @mcp.tool()
@@ -249,6 +278,39 @@ def safe_diagnostic(check: str = "system") -> str:
                                "memory": "helios_memory"}[check]]
     pr = fn({})
     return f"{title}: {pr['status'].upper()}\n" + "\n".join(pr["items"] + [f"! {i}" for i in pr["issues"]])
+
+
+@mcp.tool()
+def get_capabilities() -> str:
+    """What this Helios server offers RIGHT NOW: each tool with its kind (read / write / action)
+    and whether it's available, disabled or blocked by read-only mode, plus the safety rules every
+    call follows. Call this first to discover what you may use."""
+    if (r := _guard("get_capabilities", {})):
+        return r
+    c = cfg()
+    disabled, ro = set(c.get("disabled_tools") or []), bool(c.get("read_only", False))
+    lines = [f"Helios public MCP server — {'READ-ONLY' if ro else 'read + write'}; "
+             f"{c.get('max_calls_per_minute', DEFAULT_RATE)} calls per tool per minute."]
+    for name, (_internal, kind) in TOOLS.items():
+        state = "disabled" if name in disabled else ("blocked (read-only)" if ro and kind != "read" else "available")
+        lines.append(f"- {name} [{kind}] {state}")
+    lines.append("Every call goes through Helios's permission policy (actions may need the user's approval, "
+                 "denied if they can't be asked) and is audit-logged. Nothing here sends messages to people, "
+                 "deletes, pushes, publishes, installs or runs arbitrary commands.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_night_mode_status() -> str:
+    """Night Mode (overnight maintenance): on/off, the next window and its tasks, the power state,
+    and how the last nights went."""
+    if (r := _guard("get_night_mode_status", {})):
+        return r
+    from helios.night_mode import scheduler
+    return _cap(scheduler.status_text())
+
+
+# (Business-opportunity data stays internal-only — see docs/HELIOS_MCP.md.)
 
 
 # ------------------------------------------------------------------------------ write / action tools

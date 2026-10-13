@@ -32,4 +32,11 @@ def run(ctx: dict) -> Result:
                 res.observed.append(f"seen again ({l['category']}): {l['text']}")
         res.data[day] = {"method": out["method"], "lessons": len(out["lessons"])}
     res.summary = f"{stored} new lesson(s), {pending} waiting for approval" if stored else "nothing new learned"
+    # Memory hygiene: browsing / screen summaries are episodic and expire.
+    from .. import memory_store
+    pruned = memory_store.prune_episodic()
+    res.data["pruned_episodic"] = pruned
+    if pruned:
+        res.completed.append(f"removed {pruned} expired browsing/screen note(s) "
+                             f"(older than {memory_store.EPISODIC_DAYS} days)")
     return res

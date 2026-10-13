@@ -622,6 +622,8 @@ class Handler(BaseHTTPRequestHandler):
         one = lambda k: (q.get(k, [""])[0] or "")   # noqa: E731
         if name == "summary":
             data = dashboard.summary()
+        elif name == "voice":       # cheap: the MCP server's perceive() reads this every call
+            data = dashboard.voice_status()
         elif name == "limits":
             data = dashboard.limits(force=one("refresh") == "1")
         elif name == "business":
