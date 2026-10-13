@@ -279,6 +279,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({
                 "workflow": wf, "spec": spec, "runs": db.list_workflow_runs(wid, 20),
             }).encode())
+        if path == "/prospects":
+            from .prospecting import engine as pros, store as pstore
+            q = parse_qs(urlparse(self.path).query)
+            status = (q.get("status", [""])[0] or "").upper()
+            statuses = {"QUEUE": ["DRAFTED"], "QUALIFIED": ["QUALIFIED", "DRAFTED"],
+                        "APPROVED": ["APPROVED"], "CONTACTED": ["CONTACTED", "REPLIED", "INTERESTED"]}.get(status)
+            items = []
+            for st in (statuses or [None]):
+                items += pstore.list_prospects(status=st, limit=60)
+            counts = pstore.counts()
+            return self._send(200, json.dumps({"items": [pros.card(p) for p in items[:60]], "counts": counts},
+                                              default=str).encode())
         # ---- 3D models (registry-backed: opaque ids only, GLB only; ported from Helios-main) ----
         if path == "/models":
             from . import models3d
@@ -311,6 +323,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(401, b'{"error":"unauthorized"}')
         self._raw_body = self._read_body()  # drain once; _json_body() parses this
         path = urlparse(self.path).path
+        if path == "/prospects/action":
+            # The user's own click in the dashboard (token + origin checked above) — the only way
+            # besides the CLI / the permission prompt to approve. Approving sends NOTHING.
+            from .prospecting import engine as pros, store as pstore
+            body = self._json_body()
+            act = str(body.get("action") or "")
+            try:
+                pid = int(body.get("id"))
+                if act == "approve":
+                    p = pstore.approve(pid, by="you (dashboard)")
+                elif act in ("reject", "archive"):
+                    p = pstore.set_status(pid, "REJECTED" if act == "reject" else "ARCHIVED")
+                else:
+                    return self._send(400, b'{"error":"unknown action"}')
+            except (TypeError, ValueError) as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode())
+            return self._send(200, json.dumps({"ok": True, "item": pros.card(p)}, default=str).encode())
         if path == "/message":
             body = self._json_body()
             text = (body.get("text") or "").strip()

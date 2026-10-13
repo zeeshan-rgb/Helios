@@ -476,6 +476,25 @@ def draft_reply(message_id: str, body: str | None = None, *, llm=None) -> dict:
     return rec
 
 
+def create_outreach_draft(to: str, subject: str, body: str) -> dict:
+    """A NEW Gmail draft (not a reply) for an outreach email the user APPROVED in the prospects
+    queue. Only a draft — the user sends it from Gmail. (Sending it through gmail_send_draft stays
+    refused: prospects aren't business contacts.)"""
+    to = parseaddr(to or "")[1]
+    if not _EMAIL_RE.match(to):
+        raise GmailError("invalid recipient address")
+    me = profile().get("emailAddress", "")
+    msg = EmailMessage()
+    msg["To"] = to
+    if me:
+        msg["From"] = me
+    msg["Subject"] = (subject or "").strip()[:200]
+    msg.set_content(_clean_reply(body))
+    d = _api("POST", "/drafts", body={"message": {"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()}})
+    conf.log("gmail", f"outreach draft created for {to} ({subject[:60]})")
+    return {"draft_id": d.get("id", ""), "to": to}
+
+
 def pending(include_all: bool = False) -> list[dict]:
     drafts = _load(_state_file(), {}).get("drafts") or []
     return drafts if include_all else [d for d in drafts if d.get("status") == "pending"]

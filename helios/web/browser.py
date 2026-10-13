@@ -86,6 +86,34 @@ _LINKS_JS = r"""
   .filter(l => l.href.startsWith('http')).slice(0, limit)
 """
 
+_AUDIT_JS = r"""
+() => {
+  const m = n => { const e = document.querySelector(`meta[name="${n}"],meta[property="${n}"]`); return e ? (e.content || '') : ''; };
+  const ld = [];
+  for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try { const j = JSON.parse(s.textContent); for (const x of (Array.isArray(j) ? j : [j])) {
+      const t = x && (x['@type'] || (x['@graph'] || []).map(g => g['@type'])); if (t) ld.push(t); } } catch (e) {}
+  }
+  const forms = [...document.forms].map(f => ({
+    method: (f.getAttribute('method') || 'get').toLowerCase(), action: f.action || '',
+    email: !!f.querySelector('input[type=email],input[name*=mail i]'),
+    tel: !!f.querySelector('input[type=tel],input[name*=phone i]'),
+    textarea: !!f.querySelector('textarea'), inputs: f.querySelectorAll('input,textarea,select').length}));
+  return {
+    title: document.title || '', description: m('description') || m('og:description'),
+    viewport: m('viewport'), lang: document.documentElement.lang || '',
+    h1: document.querySelectorAll('h1').length, og_title: m('og:title'),
+    json_ld: ld.flat().map(String).slice(0, 20),
+    text: (document.body ? document.body.innerText : '').slice(0, 30000),
+    links: [...document.querySelectorAll('a[href]')].slice(0, 400).map(a => ({href: a.href, text: (a.innerText || a.title || '').trim().slice(0, 80)})),
+    forms, iframes: [...document.querySelectorAll('iframe[src]')].map(f => f.src).slice(0, 20),
+    scripts: [...document.querySelectorAll('script[src]')].map(s => s.src).slice(0, 80),
+    nav_links: document.querySelectorAll('nav a, header a').length,
+    images_without_alt: [...document.images].filter(i => !i.alt).length, images: document.images.length,
+  };
+}
+"""
+
 _LAUNCH_ARGS = ["--disable-extensions", "--disable-background-networking", "--disable-component-update",
                 "--disable-default-apps", "--disable-sync", "--no-first-run", "--disable-gpu",
                 "--renderer-process-limit=2", "--mute-audio",
@@ -472,6 +500,53 @@ class Browser:
             conf.log("browser", f"downloaded {name} ({out.stat().st_size} bytes) from {p.url[:120]}")
             return out
         return self._run(go, timeout=self.timeout_ms / 1000 + 60)
+
+    def audit(self, url: str) -> dict:
+        """One-pass website audit in its own throwaway tab: load (timed) with console errors
+        collected, page facts (meta, JSON-LD, links, forms, iframes, scripts, text), then a
+        phone-width re-layout check for horizontal overflow. Read-only — nothing is clicked or
+        submitted."""
+        why = policy.check_url(url)
+        if why:
+            raise BrowserError(f"won't open {url}: {why}")
+
+        def go():
+            self._ensure()
+            p = self._ctx.new_page()
+            errors: list[str] = []
+
+            def on_console(msg):
+                # resources WE skipped (images/fonts/media, blocked addresses) log "Failed to load
+                # resource" — that's not the site's fault, so it doesn't count as a script error
+                if msg.type == "error" and "Failed to load resource" not in msg.text \
+                        and "ERR_BLOCKED_BY_CLIENT" not in msg.text:
+                    errors.append(msg.text[:200])
+            p.on("console", on_console)
+            p.on("pageerror", lambda exc: errors.append(str(exc)[:200]))
+            t0 = time.monotonic()
+            try:
+                resp = p.goto(url, wait_until="load")
+            except Exception as e:
+                p.close()
+                raise BrowserError(f"couldn't load {url}: {str(e).splitlines()[0][:200]}") from None
+            load_ms = int((time.monotonic() - t0) * 1000)
+            try:
+                p.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            try:
+                facts = p.evaluate(_AUDIT_JS)
+                p.set_viewport_size({"width": 390, "height": 844})
+                p.wait_for_timeout(700)
+                mob = p.evaluate("() => ({w: document.documentElement.scrollWidth, vw: window.innerWidth})")
+                info = self._info("audit", p, resp)
+            finally:
+                p.close()
+            facts.update(final_url=info["url"], status=info["status"], redirects=info["redirects"],
+                         load_ms=load_ms, console_errors=errors[:10],
+                         mobile_overflow=bool(mob["w"] > mob["vw"] + 8), mobile_width=mob["w"])
+            return facts
+        return self._run(go, timeout=self.timeout_ms / 1000 + 40)
 
     @property
     def running(self) -> bool:

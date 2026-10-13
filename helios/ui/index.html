@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=0.11.0" />
+  <link rel="stylesheet" href="/static/style.css?v=0.12.0" />
 </head>
 <body>
   <!-- Holographic open-animation overlay (cyan scan line + edge glow + CRT grid). Inert
@@ -66,6 +66,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 13.4l7.2 4.2M15.6 6.4l-7.2 4.2"/></svg></button>
       <button id="workflowbtn" class="iconbtn" title="Workflows" aria-label="Workflows">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M7 11v3a2 2 0 0 0 2 2h4"/></svg></button>
+      <button id="prospectbtn" class="iconbtn" title="Business prospects" aria-label="Business prospects">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v10h16V10"/><path d="M3 10l2-6h14l2 6"/><path d="M3 10c0 1.7 1.3 3 3 3s3-1.3 3-3c0 1.7 1.3 3 3 3s3-1.3 3-3c0 1.7 1.3 3 3 3s3-1.3 3-3"/><path d="M10 20v-5h4v5"/></svg></button>
       <button id="modelsbtn" class="iconbtn" title="3D models" aria-label="3D models">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg></button>
       <button id="setbtn" class="iconbtn" title="Settings" aria-label="Settings">
@@ -161,6 +163,17 @@
       <div id="missionview" class="dview hidden">
         <div id="missionlist" class="histlist"></div>
         <div id="missiondetail"></div>
+      </div>
+      <div id="prview" class="dview hidden">
+        <div class="wfsub">Local businesses Helios researched for you. Nothing is ever sent — you approve, then send it yourself.</div>
+        <div id="prtabs" class="prtabs" role="tablist">
+          <button class="prtab on" data-f="queue">To approve</button>
+          <button class="prtab" data-f="qualified">Qualified</button>
+          <button class="prtab" data-f="approved">Approved</button>
+          <button class="prtab" data-f="contacted">Contacted</button>
+          <button class="prtab" data-f="">All</button>
+        </div>
+        <div id="prlist" class="histlist"></div>
       </div>
       <div id="wfview" class="dview hidden">
         <div id="wflistview">
@@ -269,7 +282,7 @@
   {"imports": {"three": "/static/vendor/three170/three.module.min.js",
                "three/addons/": "/static/vendor/three170/addons/"}}
   </script>
-  <script src="/static/app.js?v=0.11.0"></script>
+  <script src="/static/app.js?v=0.12.0"></script>
   <script type="module" src="/static/viewer.js?v=0.10.0"></script>
 </body>
 </html>

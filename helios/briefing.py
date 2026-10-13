@@ -140,6 +140,9 @@ def build(now: datetime | None = None, rec: dict | None = None) -> dict:
     lt = _task(rec, "find_leads")
     b["leads"] = {"status": lt.get("status", "not run"), "summary": lt.get("summary", ""),
                   **{k: (lt.get("data") or {}).get(k) for k in ("new", "top")}}
+    bp = _task(rec, "business_prospecting")
+    b["prospects"] = {"status": bp.get("status", "not run"), "summary": bp.get("summary", ""),
+                      **(bp.get("data") or {})}
 
     if rec and rec.get("tasks"):
         b["sections"] = morning_report.collect(rec)
@@ -202,6 +205,23 @@ def render(b: dict) -> str:
                     for t in (ld.get("top") or [])[:5]]
         else:
             out.append(f"- {ld.get('status')}: {ld.get('summary') or 'did not run'}")
+        out.append("")
+    bp = b.get("prospects") or {}
+    if bp.get("status") not in (None, "not run", "skipped"):
+        out.append("### New business opportunities")
+        if bp.get("status") == "ok":
+            out += [f"- {bp.get('researched') or 0} businesses researched",
+                    f"- {bp.get('no_or_weak_site') or 0} with no / broken website",
+                    f"- {bp.get('redesign') or 0} redesign opportunities",
+                    f"- {bp.get('strong_ai') or 0} with a strong AI opportunity",
+                    f"- {bp.get('qualified') or 0} qualified · {bp.get('to_approve') or 0} outreach drafts waiting "
+                    f"for your approval (`helios prospects list DRAFTED`)"]
+            # no contact details here on purpose — they're in `helios prospects show <id>`
+            out += [f"    - {t['name']} ({t['area'].split(',')[0]}) — {t['why'] or 'opportunity'}; "
+                    f"{t['package'] or 'no package'}; {t['price'] or '—'}; source: {t['source']} · "
+                    f"`helios prospects show {t['id']}`" for t in (bp.get("top") or [])[:5]]
+        else:
+            out.append(f"- {bp.get('status')}: {bp.get('summary') or 'did not run'}")
         out.append("")
     out += ["## Needs your approval", ""]
     if b["pending"]:
@@ -294,6 +314,12 @@ def spoken(b: dict) -> str:
         best = (f"; the best: {top.get('title')}, worth about {top.get('price_min', 0):,} to "
                 f"{top.get('price_max', 0):,} {top.get('currency', 'USD')}") if top.get("title") else ""
         parts.append(f"I found {ld['new']} new lead{'s' if ld['new'] != 1 else ''}{best}.")
+    bp = b.get("prospects") or {}
+    if bp.get("status") == "ok" and bp.get("qualified"):
+        n = bp.get("to_approve") or 0
+        parts.append(f"I researched {bp.get('researched', 0)} local businesses; {bp['qualified']} look like good "
+                     f"website prospects" + (f", with {n} outreach draft{'s' if n != 1 else ''} waiting for your "
+                                             f"approval." if n else "."))
     failed = [f for f in b["sections"].get("failed", []) if "task failed" in f]
     if b["night_status"].startswith("completed"):
         parts.append("Nothing failed." if not failed else "The details are in the report.")
