@@ -295,6 +295,26 @@ def approve(pid: int, *, by: str = "user") -> dict:
     return get(pid)
 
 
+def edit_draft(pid: int, *, subject: str, body: str, by: str = "user") -> dict:
+    """The user's own edit of the outreach text — only while it's DRAFTED (before approval), so an
+    approved message can't change afterwards. The evidence list is kept; the edit is logged."""
+    p = get(pid)
+    if not p:
+        raise StatusError("no such prospect")
+    if p["status"] != "DRAFTED":
+        raise StatusError(f"only a DRAFTED prospect's text can be edited (this one is {p['status']})")
+    body = (body or "").strip()
+    if not body:
+        raise StatusError("the draft can't be empty")
+    d = dict(p.get("draft") or {})
+    d.update(subject=(subject or d.get("subject") or "").strip()[:200], body=body[:8000],
+             edited_by=by, edited_at=now())
+    log = p.get("contact_log") or []
+    log.append({"at": now(), "event": "draft edited", "by": by})
+    _write(pid, {"draft": d, "contact_log": log})
+    return get(pid)
+
+
 def record_contact(pid: int, *, channel: str, evidence: str, by: str = "user") -> dict:
     """Mark CONTACTED — only for an APPROVED prospect, only with evidence of the send (Gmail sent
     message id, or the user's own confirmation)."""

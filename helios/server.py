@@ -291,6 +291,8 @@ class Handler(BaseHTTPRequestHandler):
             counts = pstore.counts()
             return self._send(200, json.dumps({"items": [pros.card(p) for p in items[:60]], "counts": counts},
                                               default=str).encode())
+        if path.startswith("/dashboard/"):
+            return self._dashboard_get(path[len("/dashboard/"):], parse_qs(urlparse(self.path).query))
         # ---- 3D models (registry-backed: opaque ids only, GLB only; ported from Helios-main) ----
         if path == "/models":
             from . import models3d
@@ -333,6 +335,9 @@ class Handler(BaseHTTPRequestHandler):
                 pid = int(body.get("id"))
                 if act == "approve":
                     p = pstore.approve(pid, by="you (dashboard)")
+                elif act == "edit":
+                    p = pstore.edit_draft(pid, subject=str(body.get("subject") or ""),
+                                          body=str(body.get("body") or ""), by="you (dashboard)")
                 elif act in ("reject", "archive"):
                     p = pstore.set_status(pid, "REJECTED" if act == "reject" else "ARCHIVED")
                 else:
@@ -340,6 +345,14 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError) as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode())
             return self._send(200, json.dumps({"ok": True, "item": pros.card(p)}, default=str).encode())
+        if path == "/dashboard/run":
+            # Quick actions the user clicked (token + origin checked above): Night Mode / project
+            # checks start in the background; the result arrives as a 'dashboard' SSE event.
+            from . import dashboard
+            hub = self.app["hub"]
+            res = dashboard.run_action(str(self._json_body().get("action") or ""),
+                                       emit=lambda d: hub.publish("dashboard", d))
+            return self._send(200 if res["ok"] else 409, json.dumps(res).encode())
         if path == "/message":
             body = self._json_body()
             text = (body.get("text") or "").strip()
@@ -396,6 +409,13 @@ class Handler(BaseHTTPRequestHandler):
                     data["level"] = max(0.0, min(1.0, float(body.get("level"))))
                 except (TypeError, ValueError):
                     pass
+            if "followup" in body:   # hot-mic follow-up listening (no wake word needed)
+                data["followup"] = bool(body.get("followup"))
+            if "wake" in body:       # the daemon's own wake-word readiness, for the dashboard
+                data["wake"] = str(body.get("wake") or "")[:80]
+                data["wake_reason"] = str(body.get("wake_reason") or "")[:200]
+            from . import dashboard
+            dashboard.note_voice(data)
             self.app["hub"].publish("voice", data)
             return self._send(200, b'{"ok":true}')
         if path == "/voice/toggle":
@@ -595,6 +615,41 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, b'{"error":"bad id"}')
             return self._send(200, json.dumps({"ok": db.delete_workflow(wid)}).encode())
         return self._send(404, b'{"error":"not found"}')
+
+    def _dashboard_get(self, name: str, q: dict):
+        """Read-only dashboard data (helios/dashboard.py). Token-gated like every other GET."""
+        from . import dashboard
+        one = lambda k: (q.get(k, [""])[0] or "")   # noqa: E731
+        if name == "summary":
+            data = dashboard.summary()
+        elif name == "limits":
+            data = dashboard.limits(force=one("refresh") == "1")
+        elif name == "business":
+            data = {"items": dashboard.business(), "coverage": dashboard.coverage()}
+        elif name == "map":
+            data = dashboard.map_data()
+        elif name == "activity":
+            data = {"items": dashboard.activity(), "research": dashboard.research_items()}
+        elif name == "upcoming":
+            data = {"items": dashboard.upcoming()}
+        elif name == "projects":
+            data = {"items": dashboard.projects_view()}
+        elif name == "report":
+            data = {"text": dashboard.night_report()}
+        elif name == "module":
+            data = dashboard.module_detail(one("id"))
+            if data is None:
+                return self._send(404, b'{"error":"no such module"}')
+        elif name == "prospect":
+            try:
+                data = dashboard.prospect(int(one("id")))
+            except ValueError:
+                return self._send(400, b'{"error":"bad id"}')
+            if data is None:
+                return self._send(404, b'{"error":"no such prospect"}')
+        else:
+            return self._send(404, b'{"error":"not found"}')
+        return self._send(200, json.dumps(data, default=str).encode())
 
     def _serve_file(self, name: str, ctype: str):
         # Guard against path traversal via crafted /static/ names.
