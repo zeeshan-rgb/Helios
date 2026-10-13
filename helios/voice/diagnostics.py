@@ -51,17 +51,86 @@ def check_tts(cfg: dict) -> tuple[str, str]:
 
 
 def check_stt(cfg: dict) -> tuple[str, str]:
-    engine = str(cfg.get("stt_engine", "faster-whisper")).lower()
-    if engine != "faster-whisper":
-        return "ok", f"{engine} (cloud) — not tested offline"
+    from .stt import Transcriber, model_root, stt_settings
+    s = stt_settings(cfg)
+    if s["provider"] != "faster-whisper":
+        return "ok", f"{s['provider']} (cloud) — not tested offline"
     try:
-        from faster_whisper import WhisperModel
+        import numpy as np
         t0 = time.time()
-        WhisperModel(cfg.get("stt_model", "base.en"), device="cpu", compute_type="int8")
-        where = os.environ.get("HF_HOME") or "~/.cache/huggingface"
-        return "ok", f"faster-whisper {cfg.get('stt_model', 'base.en')} loaded in {time.time()-t0:.1f}s (cache: {where})"
+        tr = Transcriber(str(s["model"]), device=str(s["device"]), compute_type=str(s["compute_type"]),
+                         language=str(s["language"]), beam_size=int(s["beam_size"]))
+        tr._ensure()
+        load = time.time() - t0
+        t0 = time.time()
+        tr._run(np.zeros(32000, dtype="float32"))
+        root = model_root() or "default Hugging Face cache"
+        lang = tr.language or "auto-detect"
+        detail = (f"faster-whisper {s['model']} on {tr.device} ({tr.compute_type}), language {lang}, "
+                  f"beam {tr.beam_size} — loaded {load:.1f}s, 2 s of audio in {time.time() - t0:.2f}s "
+                  f"(models: {root})")
+        tr.close()
+        on_c = str(root).upper().startswith("C:")
+        return ("warn", detail + " — models are on C:, set HF_HOME to a D: folder") if on_c else ("ok", detail)
     except Exception as e:
         return "fail", f"faster-whisper failed: {e}"
+
+
+def analyse_mic(samples, rate: int = 16000) -> dict:
+    """Level / peak / clipping / noise floor of a mono int16 recording."""
+    import numpy as np
+    x = np.asarray(samples, dtype="float32").reshape(-1) / 32768.0
+    if x.size == 0:
+        return {"rms_db": -120.0, "peak_db": -120.0, "clip_pct": 0.0, "floor_db": -120.0}
+    db = lambda v: float(20 * np.log10(max(float(v), 1e-6)))  # noqa: E731
+    frame = max(1, rate // 20)                                # 50 ms frames
+    n = x.size // frame
+    frames = x[: n * frame].reshape(n, frame) if n else x.reshape(1, -1)
+    frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    return {"rms_db": round(db(np.sqrt(np.mean(x ** 2))), 1), "peak_db": round(db(np.max(np.abs(x))), 1),
+            "clip_pct": round(float(np.mean(np.abs(x) >= 0.999)) * 100, 3),
+            "floor_db": round(db(np.percentile(frame_rms, 10)), 1)}
+
+
+def mic_verdict(m: dict) -> tuple[str, str]:
+    detail = (f"level {m['rms_db']} dBFS, peak {m['peak_db']} dBFS, noise floor {m['floor_db']} dBFS, "
+              f"clipping {m['clip_pct']}%")
+    if m["peak_db"] < -60:
+        return "fail", f"no sound at all ({detail}) — mic muted, blocked in Windows privacy settings, or wrong device"
+    if m["clip_pct"] > 0.1:
+        return "warn", f"clipping ({detail}) — lower the mic level in Windows sound settings"
+    if m["floor_db"] > -35:
+        return "warn", f"noisy room or hum ({detail}) — speech will be harder to pick out"
+    if m["peak_db"] < -30:
+        return "warn", f"very quiet ({detail}) — raise the mic level or speak closer (did you speak during the test?)"
+    return "ok", detail
+
+
+def check_mic(seconds: float = 3.0, recorder=None) -> tuple[str, str]:
+    """Record a few seconds from the default mic (nothing is saved) and judge the levels."""
+    try:
+        if recorder is None:
+            import sounddevice as sd
+            rec = sd.rec(int(seconds * 16000), samplerate=16000, channels=1, dtype="int16")
+            sd.wait()
+            samples = rec[:, 0]
+        else:
+            samples = recorder(seconds)
+    except Exception as e:
+        return "fail", f"couldn't record from the microphone: {e}"
+    return mic_verdict(analyse_mic(samples))
+
+
+def check_hardware() -> tuple[str, str]:
+    try:
+        from .. import hardware
+        info = hardware.detect(quick=True)
+        r = info["recommended"]
+        gpu = info["gpus"][0]["name"] if info["gpus"] else "no GPU found"
+        return "ok", (f"{info['cpu']}, {info['ram_gb']} GB RAM, {gpu}, CUDA {info['cuda_devices']} — "
+                      f"suggested speech model {r['stt_model']} on {r['stt_device']}")
+    except Exception as e:
+        return "warn", f"hardware detection failed: {e}"
 
 
 def check_capture(cfg: dict) -> tuple[str, str]:
@@ -118,13 +187,16 @@ def check_voice_lock(cfg: dict) -> tuple[str, str]:
     return "ok", f"on — only your enrolled voice is accepted (threshold {v.threshold:.2f})"
 
 
-def run_checks() -> list[tuple[str, str, str]]:
+def run_checks(*, mic: bool = False) -> list[tuple[str, str, str]]:
     cfg = conf.voice_cfg()
     results: list[tuple[str, str, str]] = []
     results.append(("voice enabled", "ok" if cfg.get("enabled") else "warn",
                     "yes" if cfg.get("enabled") else "no — set [voice].enabled = true"))
+    results.append(("hardware", *check_hardware()))
     st, a, b = _devices()
     results.append(("audio devices", st, f"{a}; {b}".strip("; ")))
+    if mic and st == "ok":
+        results.append(("mic levels", *check_mic()))
     results.append(("text-to-speech", *check_tts(cfg)))
     results.append(("speech-to-text", *check_stt(cfg)))
     results.append(("speech capture", *check_capture(cfg)))

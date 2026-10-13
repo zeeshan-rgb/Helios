@@ -1054,6 +1054,12 @@ class VoiceDaemon:
             except Exception:
                 pass
         try:
+            close = getattr(self.stt, "close", None)
+            if close:
+                close()                      # release the speech model
+        except Exception:
+            pass
+        try:
             self.mic.close()
         except Exception:
             pass

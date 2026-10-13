@@ -175,12 +175,16 @@ def cmd_learn(args) -> int:
 
 
 def cmd_voice_check(args) -> int:
-    """Check every piece of the voice pipeline; --speak also plays a test line."""
+    """Check every piece of the voice pipeline; --mic also records 3 s to check your mic levels
+    (say something during it — nothing is saved); --speak also plays a test line."""
     _conf()
     from helios.voice import diagnostics
+    mic = bool(args and "--mic" in args)
     print("Helios voice check (loads the models — takes a few seconds)...\n")
+    if mic:
+        print("Mic test: say a sentence in your normal voice for the next 3 seconds...\n")
     worst = "ok"
-    for name, status, detail in diagnostics.run_checks():
+    for name, status, detail in diagnostics.run_checks(mic=mic):
         mark = {"ok": "[ok]  ", "warn": "[warn]", "fail": "[FAIL]"}[status]
         print(f"  {mark} {name:15s} {detail}")
         if status == "fail" or (status == "warn" and worst == "ok"):

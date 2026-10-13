@@ -108,9 +108,10 @@ class FinalExecutor:
 class PartialExecutor:
     """Live text: a small faster-whisper model with a CPU-thread cap, greedy decoding."""
 
-    def __init__(self, model: str = "tiny.en", threads: int = 2):
+    def __init__(self, model: str = "tiny.en", threads: int = 2, prompt: str = ""):
         self.model_name = model
         self.threads = max(1, int(threads))
+        self.prompt = (prompt or "").strip() or None   # same vocabulary hint as the final model
         self._model = None
         self._lock = threading.Lock()
 
@@ -119,8 +120,9 @@ class PartialExecutor:
             with self._lock:
                 if self._model is None:
                     from faster_whisper import WhisperModel
-                    self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8",
-                                               cpu_threads=self.threads)
+                    from .stt import load_whisper, model_root
+                    self._model = load_whisper(WhisperModel, self.model_name, device="cpu", compute_type="int8",
+                                               cpu_threads=self.threads, download_root=model_root())
                     conf.log("voice", f"realtime partial model '{self.model_name}' loaded")
         return self._model
 
@@ -133,7 +135,8 @@ class PartialExecutor:
             return _result("")
         segments, _ = self._ensure().transcribe(a, language="en", beam_size=1,
                                                 condition_on_previous_text=False,
-                                                without_timestamps=True, vad_filter=False)
+                                                without_timestamps=True, vad_filter=False,
+                                                initial_prompt=self.prompt)
         return _result(" ".join(s.text.strip() for s in segments).strip())
 
 
@@ -147,7 +150,8 @@ class RealtimeCapture:
         self.cfg = cfg
         self.final = FinalExecutor(stt, stt_lock)
         self.partial = PartialExecutor(str(cfg.get("rt_partial_model", "tiny.en")),
-                                       int(cfg.get("rt_partial_threads", 2)))
+                                       int(cfg.get("rt_partial_threads", 2)),
+                                       prompt=getattr(stt, "initial_prompt", ""))
         self._recorder_cls = recorder_cls
         self.rec = None
         self.error = ""

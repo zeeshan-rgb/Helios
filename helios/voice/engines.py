@@ -153,9 +153,13 @@ def build_speaker(cfg: dict) -> Speaker:
 
 
 def build_transcriber(cfg: dict) -> Transcriber:
-    """Construct the configured STT engine (default: local faster-whisper)."""
-    engine = str(cfg.get("stt_engine", "faster-whisper")).strip().lower()
-    if engine in ("openai", "groq"):
-        return CloudTranscriber(engine, cfg)
-    return Transcriber(cfg.get("stt_model", "base.en"),
-                       initial_prompt=cfg.get("stt_prompt", ""))
+    """Construct the configured STT engine (default: local faster-whisper). Reads [voice.stt]
+    (preferred) over the older flat stt_* keys — see voice/stt.py."""
+    from .stt import stt_settings, vocabulary_prompt
+    s = stt_settings(cfg)
+    if s["provider"] in ("openai", "groq"):
+        return CloudTranscriber(s["provider"], cfg)
+    return Transcriber(str(s["model"]), initial_prompt=vocabulary_prompt(s),
+                       device=str(s["device"]), compute_type=str(s["compute_type"]),
+                       language=str(s["language"]), beam_size=int(s["beam_size"]),
+                       cpu_threads=int(s["cpu_threads"]), vad_filter=bool(s["vad_filter"]))
