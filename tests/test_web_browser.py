@@ -150,6 +150,21 @@ class FakePage:
     def content(self):
         return "<html></html>"
 
+    suggested = "report.pdf"
+
+    def expect_download(self, timeout=None):
+        page = self
+
+        class _Dl:
+            def __enter__(self):
+                self.value = SimpleNamespace(suggested_filename=page.suggested,
+                                             save_as=lambda path: Path(path).write_bytes(b"%PDF-1.4 test"))
+                return self
+
+            def __exit__(self, *a):
+                return False
+        return _Dl()
+
 
 class FakeCtx:
     def __init__(self, elements):
@@ -417,8 +432,36 @@ def test_live_headless_edge():
             b.click(refs["Send"])
         with pytest.raises(BrowserError, match="SSRF"):
             b.open("http://127.0.0.1:1/")
+        # real accessibility tree + a real download (data: URL, no network)
+        page = ("<h1>Docs</h1><a href='data:text/plain;base64,aGVsbG8gaGVsaW9z' download='note.txt'>Get note</a>")
+        b.open("data:text/html," + urllib.parse.quote(page))
+        assert "heading" in b.aria() and "Docs" in b.aria()
+        refs = {e["label"]: e["ref"] for e in b.snapshot()}
+        out = b.download(refs["Get note"])
+        assert out.name == "note.txt" and out.read_text() == "hello helios"
+        out.unlink()
     finally:
         b.close()
+
+
+def test_accessibility_tree_and_html_reads(br):
+    br.open("https://example.com/page")
+    assert br.aria() == '- heading "Hello"'
+    assert br.html() == "<html></html>" and br.html(selector="main") == "<b>x</b>"
+
+
+def test_download_saves_inside_helios_data_with_a_safe_name(br, tmp_path):
+    br.open("https://example.com/files")
+    out = br.download("e4")
+    assert out.parent == bmod.data_dir() / "downloads"
+    assert out.read_bytes().startswith(b"%PDF") and out.name == "report.pdf"
+    page = br.tabs[br.current]
+    page.suggested = "../../Windows/System32/evil.exe"
+    out2 = br.download("e4")
+    assert out2.parent == out.parent and "/" not in out2.name and "\\" not in out2.name
+    assert out2.resolve().is_relative_to(out.parent.resolve())
+    log = (bmod.conf.LOGS_DIR / "browser.log").read_text(encoding="utf-8")
+    assert "downloaded report.pdf" in log
 
 
 def test_new_tab_as_the_very_first_call(br):
