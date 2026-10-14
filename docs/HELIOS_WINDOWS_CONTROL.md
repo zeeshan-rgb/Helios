@@ -23,6 +23,10 @@ Two halves, deliberately separate:
 
 After every action: `verify_state`, or one fresh read, to confirm the *expected* change.
 
+`mcp__helios__locate` runs this ladder across surfaces in one call (your window's UIA elements →
+Helios's hidden-browser DOM → OCR) and hands back the exact next call; `perceive` gives the
+one-shot context first. See "Multimodal orchestration" in `HELIOS_SCREEN_INTELLIGENCE.md`.
+
 ## Screen context (`screen_context`)
 
 * **What it returns:** the active app and title with `pid`/`window_id`, the focused control,

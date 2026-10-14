@@ -865,7 +865,7 @@ def cmd_security(args) -> int:
     checks = security.self_check()
     print("HELIOS SECURITY CHECK\n")
     print(security.format_checks(checks))
-    print("\nDetails: docs/SECURITY.md")
+    print("\nDetails: docs/HELIOS_SECURITY.md")
     return 1 if any(s == "fail" for _, s, _ in checks) else 0
 
 

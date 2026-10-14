@@ -9,7 +9,7 @@ independently. Nothing in Helios depends on any client being installed.
 | | `mcp/helios_public_server.py` | `mcp/helios_server.py` |
 |---|---|---|
 | For | **other MCP clients** | Helios's **own brain** only |
-| Tools | 13 curated tools (below) | ~60 tools, including writing and running new tools, spawning agents, deleting routines |
+| Tools | 15 curated tools (below) | 99 tools, including writing and running new tools, spawning agents, deleting routines, the desktop / browser / screen tools (`perceive`, `locate`, `browser_*`, …) |
 | Permission gate | **inside the server**: every call is decided by `hooks/pretooluse.decide` | the brain's PreToolUse hook, *before* the call reaches the server |
 | Starts when | any client launches it | **only when Helios launches it**: it exits unless `HELIOS_MCP_ROLE=internal` (set in `config/mcp.json`) |
 
@@ -30,6 +30,8 @@ the policy itself.
 | `get_morning_report(spoken)` | read | today's morning briefing (written or spoken) | `mcp__helios__morning_briefing` |
 | `search_research(topic, query, days)` | read | sourced research findings (kept apart from memory) | `mcp__helios__research_findings` |
 | `safe_diagnostic(check)` | read | fixed list: `system`, `disk`, `network`, `helios`, `voice`, `memory`, `errors` | `mcp__helios__system_health` |
+| `get_capabilities` | read | **discovery**: every tool with its kind and whether it's available, disabled or blocked by read-only mode, plus the rules every call follows | `mcp__helios__mcp_capabilities` |
+| `get_night_mode_status` | read | Night Mode on/off, next window and tasks, power state, recent nights | `mcp__helios__night_mode_status` |
 | `save_memory(text, category, project)` | write | remember something; secrets refused; **rules/skills wait for your approval**; source recorded as `mcp client` | `mcp__helios__remember` |
 | `create_reminder(text, in_minutes \| at_iso)` | write | Helios reminder (toast + chat when due) | `mcp__helios__set_reminder` |
 | `open_app(name)` | action | open an app or website on the PC | `mcp__helios__open_app` |
@@ -44,7 +46,9 @@ the policy itself.
 - running arbitrary commands
 - YOLO
 - approving lessons
-- computer control
+- computer control, screen reading (`perceive`, `locate`, `screen_context`) and the hidden browser
+- business prospects and freelance leads (business data stays internal)
+- browsing / screen memory notes (memory search returns stable memory only)
 
 ## Authorization
 
@@ -56,7 +60,7 @@ server maps the tool to its internal name (the table above) and calls `hooks/pre
   isn't running, or nobody answers within about two minutes, the call is **denied**.
 - **A gate error is a deny**, never an allow.
 
-With the default policy, all 13 tools are allowed. To require approval for one, add it to
+With the default policy, all 15 tools are allowed. To require approval for one, add it to
 `always_ask` in `config/settings.toml`:
 
 ```toml
@@ -71,7 +75,10 @@ On top of the gate, the server has its own switches:
 enabled = true         # false = every call is refused
 read_only = false      # true = only the read tools work
 disabled_tools = []    # e.g. ["open_app"]
+max_calls_per_minute = 30  # per tool; a looping client is refused until the minute passes (0 = off)
 ```
+
+Refusals from these switches and the rate limit happen **before** the gate and are logged too.
 
 Every call is written to `logs/mcp_public.log` with the tool, its kind, the decision and the
 reason, plus a redacted summary of the arguments. See it with `helios mcp log`.
@@ -116,7 +123,20 @@ Commands:
 5. Add it to the tests in `tests/test_mcp_public_phase11.py`. The test fails if the tool list
    changes without it.
 
-## Verified (2026-09-30)
+## Verified (2026-10-14)
+
+- A real stdio client started the public server and listed exactly the 15 tools
+  (`tests/test_mcp_public_phase11.py::test_public_server_starts_over_stdio`).
+- Inside a Helios brain session the public server serves **no** tools, so it never duplicates the
+  internal server (`tests/test_antigravity_mcp_phase12.py`).
+- Every public tool is decided under a **real** internal tool name, and every read tool is
+  "allow" in the policy (`tests/test_mcp_public_improvements.py`). The same file covers
+  `get_capabilities` following the live switches and the per-tool rate limit (refused calls never
+  reach the gate and are logged).
+- Not done (your call): registering `helios-public` in Antigravity's global MCP config
+  (`helios mcp antigravity` prints the command).
+
+## Verified earlier (2026-09-30)
 
 - A real stdio MCP client listed exactly the 13 tools and called:
   - `get_active_projects`, `get_morning_report(spoken)`, `search_research(Gemini)` and
