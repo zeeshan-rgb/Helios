@@ -1,43 +1,57 @@
 # Helios
 
-[![version](https://img.shields.io/badge/version-0.9.0-1f6feb?style=flat-square)](https://github.com/NotTimPunt/jarvis) ![python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square&logo=python&logoColor=white) ![platform](https://img.shields.io/badge/platform-Windows%2011-0078d6?style=flat-square&logo=windows&logoColor=white) ![brain](https://img.shields.io/badge/brain-Claude%20Code-d97757?style=flat-square) ![status](https://img.shields.io/badge/status-alpha-orange?style=flat-square)
+![version](https://img.shields.io/badge/version-0.10.0-1f6feb?style=flat-square) ![python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square&logo=python&logoColor=white) ![platform](https://img.shields.io/badge/platform-Windows%2011-0078d6?style=flat-square&logo=windows&logoColor=white) ![brain](https://img.shields.io/badge/brain-Antigravity%20CLI-4285f4?style=flat-square) ![tests](https://img.shields.io/badge/tests-1033%20passing-2ea043?style=flat-square)
 
-A local, always-on AI assistant for Windows in the spirit of Iron Man's Helios. It
-**routes its thinking to Claude** (via your Claude Code subscription — no API key needed;
-API-key and local/Ollama "lite" brains also supported), **controls your PC like a human**
-(reads the UI tree, clicks, types — in the background, without stealing your cursor),
-**talks and listens** (fully on-device voice), and keeps a **living memory** inside your
-Obsidian vault.
+A local, always-on AI assistant for Windows. It **thinks with Google Antigravity** (the official
+`agy` CLI on your Google AI Pro account — no API key; Claude Code and OpenAI-compatible "lite"
+brains also supported), **sees and controls your PC** (UI Automation + OCR, in the background),
+**works the web** (a hidden headless browser and a clean page reader), **talks and listens**
+(on-device voice), keeps a **living memory** in your Obsidian vault, and runs **Night Mode**
+overnight. Every action passes **one safety gate in code** — the model is never the authority.
+
+Forked from [NotTimPunt/jarvis](https://github.com/NotTimPunt/jarvis) and rebuilt; see
+[docs/HELIOS_ARCHITECTURE.md](docs/HELIOS_ARCHITECTURE.md).
 
 ```
-"hey Helios" ──▶ wake word → whisper STT ─┐
-You ──▶ chat window / orb / tray / phone ─┴─▶ Brain (claude -p, streaming)
-                                               │  • auto-routes model per task (haiku/sonnet/opus)
-                                               │  • computer-use (UI-tree click/type, background)
-                                               │  • shell + files + skills + Composio + own tools
-                                               │  • workflows · multi-agent missions · reminders
-                                               │  • risky actions ask you Approve/Deny (or on Telegram)
-                                               ▼
-                                     Obsidian vault = memory   ·   Kokoro TTS speaks the reply
+"hey Helios" / clap ──▶ wake → VAD → faster-whisper ─┐
+You ──▶ dashboard / orb / tray / phone ──────────────┴─▶ Brain (agy, persistent session, streaming)
+                                                          │  • perceive / locate: screen (UIA, OCR), your browser, Helios's hidden browser
+                                                          │  • computer control by element (cua-driver), web reading, research, leads
+                                                          │  • memory · projects · Gmail · Polarion · business prospecting · Night Mode
+                                                          │  • EVERY tool call → hooks/pretooluse.decide (hard rails, Approve/Deny)
+                                                          ▼
+                                            Obsidian vault = memory   ·   Kokoro TTS speaks the reply
 ```
 
 ## Install
 
-One line in PowerShell — installs Python if needed, downloads Helios, sets up the venv + deps, and
-adds a `helios` command to your PATH:
-
 ```powershell
-irm https://raw.githubusercontent.com/NotTimPunt/jarvis/cua-driver/install.ps1 | iex
+git clone https://github.com/zeeshan-rgb/Helios.git helios
+cd helios
+python -m venv .venv          # or point .venv at a drive with space (this install uses D:\Helios\venv)
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python helios_cli.py onboard
 ```
 
-Then connect a brain and onboard:
+Then sign agy in once (`agy` in a terminal), set `[brain] engine = "antigravity"`, and see
+**[docs/SETUP.md](docs/SETUP.md)** for voice, PC control (cua-driver) and apps.
 
-```powershell
-helios onboard
-```
+## Documentation
 
-Full walkthrough (brain choices, voice engines, onboarding modes, apps) in
-**[docs/SETUP.md](docs/SETUP.md)**.
+| | |
+|---|---|
+| [HELIOS_IMPLEMENTATION_STATUS.md](docs/HELIOS_IMPLEMENTATION_STATUS.md) | what's DONE / PARTIAL / BLOCKED, and what's waiting on you |
+| [HELIOS_ARCHITECTURE.md](docs/HELIOS_ARCHITECTURE.md) | the map: processes, request flow, code, data |
+| [HELIOS_ANTIGRAVITY.md](docs/HELIOS_ANTIGRAVITY.md) | the brain engine, gate proof, sessions, verification |
+| [HELIOS_SECURITY.md](docs/HELIOS_SECURITY.md) | the gate, hard rails, protected paths, audit logs |
+| [HELIOS_VOICE.md](docs/HELIOS_VOICE.md) | wake, VAD, STT benchmark, TTS |
+| [HELIOS_SCREEN_INTELLIGENCE.md](docs/HELIOS_SCREEN_INTELLIGENCE.md) · [HELIOS_WINDOWS_CONTROL.md](docs/HELIOS_WINDOWS_CONTROL.md) | screen reading, perceive / locate, acting by element |
+| [HELIOS_BROWSER.md](docs/HELIOS_BROWSER.md) · [HELIOS_WEB_SCRAPING.md](docs/HELIOS_WEB_SCRAPING.md) | hidden browser, clean extraction |
+| [HELIOS_MEMORY.md](docs/HELIOS_MEMORY.md) · [HELIOS_NIGHT_MODE.md](docs/HELIOS_NIGHT_MODE.md) | memory layers, learning, overnight work |
+| [HELIOS_PROSPECTING.md](docs/HELIOS_PROSPECTING.md) | local-business website opportunities (never sends) |
+| [HELIOS_MCP.md](docs/HELIOS_MCP.md) · [ANTIGRAVITY_MCP.md](docs/ANTIGRAVITY_MCP.md) | MCP servers, using Helios from Antigravity |
+| [HELIOS_DASHBOARD_UI.md](docs/HELIOS_DASHBOARD_UI.md) | the dashboard |
+| [EXTERNAL_AGENT_STACK_AUDIT.md](docs/EXTERNAL_AGENT_STACK_AUDIT.md) | what was integrated, referenced or rejected, and why |
 
 ## The `helios` command
 
@@ -53,9 +67,17 @@ helios uninstall  # remove everything (--purge also deletes the vault + model ca
 
 ## Capabilities
 
-- **Brains, tiered** — default is **Claude Code** (`claude -p`, your subscription, full tool
-  power). Or pick a **lite brain**: any OpenAI-compatible provider (OpenRouter, OpenAI, Gemini,
-  Groq, **Ollama** for fully-local) with a curated, permission-gated toolset.
+- **Brains** — **Antigravity** (`agy`, Google AI Pro, persistent streaming session; this
+  install's engine), **Claude Code** (`claude -p`), or a **lite brain** (any OpenAI-compatible
+  provider, incl. **Ollama** for fully local) with a curated, permission-gated toolset.
+- **Multimodal context** — `perceive` (foreground app, your browser's page + URL, dialogs, the
+  hidden browser, voice state) and `locate` (a target across UI Automation → hidden-browser DOM →
+  OCR, with the exact safe call to act on it).
+- **The web** — a hidden headless Edge (fresh profile, SSRF-checked, risky clicks need your
+  approval) and a clean reader with provenance; nightly research and a worldwide lead finder with
+  rate-card prices. Nothing is ever sent on your behalf.
+- **Night Mode** — overnight project checks, research, leads, business prospecting, learning and a
+  report that becomes the spoken morning briefing; power-aware, never edits Helios's code.
 - **Voice, on-device** — "hey **helios**" wake word → faster-whisper STT → **Kokoro** TTS
   (British butler by default), sentence-streamed so it starts talking immediately. Barge-in
   ("hey Helios" interrupts it mid-reply), live transcript HUD, push-to-talk dictation
@@ -109,9 +131,10 @@ dormant**: no windows, the mic listening only for a **double clap**.
 
 ## How it works
 
-- **Brain** (`helios/brain.py`) spawns `claude -p` streaming with a resumable session;
-  `helios/brain_factory.py` swaps in `lite_brain.py` (OpenAI-compatible loop) when
-  `[brain].engine = "lite"`. Every spawn gets `--max-turns` + `--fallback-model` guardrails.
+- **Brain** — `helios/brain_factory.py` picks the engine from `[brain].engine`: `agy_brain.py`
+  (Antigravity: one persistent `agy` stream-json session, gate proof + tamper check every turn —
+  [docs/HELIOS_ANTIGRAVITY.md](docs/HELIOS_ANTIGRAVITY.md)), `brain.py` (`claude -p`), or
+  `lite_brain.py` (OpenAI-compatible loop).
 - **Model routing** (`helios/router.py`) — `light` → haiku (quick chat), `medium` → sonnet
   (normal work + Q&A), `heavy` → opus (debugging, multi-step engineering). Force one with a
   `/haiku` `/sonnet` `/opus` prefix. Aliases always resolve to the latest models.
@@ -150,7 +173,8 @@ Persona: `config/persona_helios.md` · MCP servers: `config/mcp.json` · keys:
 
 | | |
 |---|---|
-| **v0.9.0** | Dashboard revamp (quiet-luxe 2.0: drawer, live tool timeline, stats popover, living canvases) + the **neural orb** rewritten as a per-pixel-alpha layered window |
+| **v0.10.0** | Antigravity engine, multimodal orchestration (perceive / locate), hidden browser + clean reader, Windows OCR, tuned STT + RealtimeSTT, Night Mode, research / leads / business prospecting, memory kinds + learning with approval, public MCP server, security acceptance suite, premium dashboard — status in [docs/HELIOS_IMPLEMENTATION_STATUS.md](docs/HELIOS_IMPLEMENTATION_STATUS.md) |
+| v0.9.0 | Dashboard revamp (quiet-luxe 2.0: drawer, live tool timeline, stats popover, living canvases) + the **neural orb** rewritten as a per-pixel-alpha layered window |
 | v0.8.x | **Workflow engine** + dashboard tab, procedural memory, skills plugin, Telegram permission buttons, security hardening, model guardrails, persistent phone sessions |
 | v0.7.0 | Public one-line installer + onboarding wizard, tiered brains (Claude / lite), pluggable voice engines, `helios` CLI (incl. `update`, `uninstall`) |
 | v0.5–0.6 | YOLO mode, mid-turn steering, all-edge resize, Spotify Web API wake-play, barge-in, computer-use recovery policy, system doctor, eval harness |

@@ -10,8 +10,19 @@ Quick check on your machine:
 helios security
 ```
 
-This is read-only. It verifies the permission gate, the MCP servers, the protected paths, the
-Night Mode allowlist, git hygiene, secrets in logs, and the YOLO and panic state.
+This is read-only. It verifies the permission gate, that destructive shell commands always ask,
+the MCP servers, the protected paths, the Night Mode allowlist, git hygiene, secrets in logs and
+settings, and the YOLO and panic state.
+
+## The acceptance rules (spec §29 K), proven through the real gate
+
+| Attempt | Result | Test |
+|---|---|---|
+| Send a message automatically (`gmail_send_draft`, a confirmed browser submit) | **BLOCKED** — YOLO can't auto-send; with nobody to approve it's denied; background agents are hard-denied | `test_security_acceptance.py` |
+| Read an API key (`config/secrets.toml`, `.env`, `~/.aws`) — by file tool, shell, or agy's own tools | **BLOCKED**, even in YOLO | `test_security_acceptance.py`, `test_security_phase14.py` |
+| Destructive operation (`Remove-Item -Recurse`, `git push --force`, `Format-Volume`, …) | **asks you**; unanswered = denied | `test_security_acceptance.py` |
+
+There is no tool anywhere that sends WhatsApp, SMS, email to prospects/leads, or posts on its own.
 
 ## How a tool call is decided
 
@@ -39,6 +50,33 @@ The order of checks, first match wins:
    above still applies.
 7. **Policy** (`helios/permissions.classify`): allow, or **ask**. Asks show the Approve/Deny prompt
    (dashboard, Telegram or voice). **No answer, the app unreachable, or any error means deny.**
+
+### Shell commands: the read-only allowlist
+
+Shell commands run on their own only when they just read or report (`Get-*`, `git status/log/diff`,
+`dir`, `ping`, …) **and** aren't chained or redirected (`;`, `&`, `|`, `>`, `` ` ``, `$(` → ask).
+Read-looking commands that can destroy through an argument always ask (found and fixed 2026-10-14 —
+they used to run without asking):
+
+| Command shape | Why it asks |
+|---|---|
+| `Format-Volume …` | only `Format-Table/List/Wide/Custom/Hex` count as reading |
+| `find … -delete / -exec / -ok` | deletes or runs commands |
+| `wmic … delete / call / set / create / terminate / uninstall` | changes the system |
+| `git branch -d/-D/-m/-M/-c/-f`, `--delete/--move/--force…` | deletes or rewrites branches |
+| `git remote add / remove / rename / set-url / prune / update` | changes where code is pushed |
+
+`helios security` re-checks these shapes on every run ("destructive commands").
+
+### New tools since the first security pass
+
+| Tool / surface | Gate |
+|---|---|
+| `perceive`, `locate`, `screen_context`, `find_ui_element`, `web_extract` | read-only → allowed; never on the public server; password managers / credential pages never read |
+| `browser_click` / `browser_type` that submit, send, buy, sign up or delete | refused unless `confirm=true`, which asks you — **never** auto-approved by YOLO, always denied to background agents |
+| `browser_download` | asks; files land only in `data/browser/downloads` with a sanitised name (a hostile `../../…` name can't escape) |
+| `prospect_approve` | asks; approving sends nothing |
+| Dashboard routes (`/dashboard/*`, `/prospects*`, …) | token on every route; POSTs also need our own Origin; Host must be loopback — a test walks **every** route in `server.py` |
 
 **Fail closed everywhere:**
 - A gate that crashes, can't load its policy, or gets unreadable input returns **deny**.
@@ -94,12 +132,15 @@ still asks you. `helios security` warns whenever this list isn't empty.
   after 5 failures in a row.
 - **MCP:**
   - The internal tool server refuses to start unless Helios launched it.
-  - The public server exposes 13 curated, non-destructive tools, each decided by the gate
-    (`docs/HELIOS_MCP.md`).
+  - The public server exposes 15 curated, non-destructive tools, each decided by the gate and
+    limited to 30 calls per tool per minute (`docs/HELIOS_MCP.md`). Business data, screen tools
+    and browsing/screen memory notes are not exposed.
 
 ## Secret isolation
 
-- **Memory refuses** anything that looks like a password, key, code or account number.
+- **Memory refuses** anything that looks like a password, key, code or account number — and also
+  credentials inside URLs / connection strings, cookies and session ids, cloud account keys and
+  card numbers (Luhn-checked). Full list: [HELIOS_MEMORY.md](HELIOS_MEMORY.md#never-stored).
 - **Every log line is redacted:** `conf.log` strips key and token shapes (`sk-…`, `ghp_…`,
   `AKIA…`, JWTs, private-key headers, bearer tokens). Vault notes use the same pattern.
 - **Approval prompts log only the tool name and an id,** never the command or path.
@@ -133,6 +174,9 @@ still asks you. `helios security` warns whenever this list isn't empty.
 
 ## Tests
 
+- `tests/test_security_acceptance.py`: the three acceptance rules through the real gate, the
+  destructive-shell shapes (and that real read-only commands stay autonomous), the new read tools,
+  every server route needing the token / our Origin, and a foreign Host refused.
 - `tests/test_security_phase14.py`:
   - protected categories and false-positive guards
   - YOLO and background-agent denials

@@ -28,6 +28,36 @@ screenshot via cua-driver (get_desktop_state / get_window_state)
 2. If no control matches, it falls back to OCR text and clearly labels the result a *visual
    match* with screen and window-local coordinates. Pixel clicks are the last rung.
 
+## Multimodal orchestration — `perceive` and `locate` (`helios/orchestrator.py`)
+
+One layer above the screen reader, so the brain doesn't have to stitch surfaces together itself:
+
+* **`perceive(window="")`** — one fast text read of everything Helios can sense: the foreground app
+  and window (pid + window_id), **whether it's the user's own browser and which page/URL it shows**
+  (read from the browser's address bar through UI Automation — no extension, no remote debugging),
+  the focused control, dialogs/errors, the hidden browser's open tabs (only if it's already running —
+  `perceive` never launches it), and the live voice state (from the app's `/dashboard/voice`).
+  A search being typed in the address bar is not reported as a URL; credential pages stay hidden.
+* **`locate(query, surface="auto"|"desktop"|"browser", window, role)`** — finds a target by what it
+  says, best first:
+  1. UI Automation controls in the user's window (real elements → `get_window_state(query)` →
+     `click(element_index)` / `set_value`),
+  2. the hidden browser's DOM (`browser_click(ref)` / `browser_type(ref, …)`) — only when the screen
+     has no semantic match and Helios is working a page there,
+  3. OCR text on the screen image — labelled a visual match, window-local pixels, last resort.
+
+  Each match carries the exact next call and how to verify it. Nothing in the orchestrator acts:
+  the tools it points to keep their own gates.
+
+The brain's playbook (`config/persona_helios.md`, "THE PIPELINE") routes context-dependent requests
+through `perceive → locate → act → verify → answer`.
+
+Verified live (2026-10-14): `perceive` read the page title and full URL from a visible Edge window;
+`locate("Learn more", surface="browser")` returned `browser_click(ref="e1")` on a hidden-browser page,
+and in `auto` it fell through to the DOM because the screen had no such control; `locate("Minimize")`
+found the real UIA button in a background VS Code window. Limitation seen: Electron apps (VS Code) in
+the background expose almost nothing to UI Automation — the honest "not found" + OCR hint is returned.
+
 ## Adaptive, nothing stored
 
 * **No background capture:** every read happens on demand.
@@ -45,7 +75,9 @@ screenshot via cua-driver (get_desktop_state / get_window_state)
 * **Never read** (UIA or OCR): password managers, Windows credential prompts, UAC, the lock
   screen, and browser password / wallet pages. They are listed by title only.
 * **Redaction:** OCR and UIA text both pass through `SECRET_RE`.
-* **Not exposed** on the public MCP server.
+* **Not exposed** on the public MCP server (neither are `perceive` / `locate`).
+* **Screen summaries in memory** are opt-in, short (≤ 600 characters) and expire after 30 days —
+  never raw screen text or images ([HELIOS_MEMORY.md](HELIOS_MEMORY.md)).
 
 ## Engines evaluated
 

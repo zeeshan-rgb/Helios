@@ -1,7 +1,7 @@
 """Security self-check (`helios security`, blueprint phase 14): is every Helios protection in
 place on THIS install? Read-only — it inspects files, settings and flags and changes nothing.
 
-Each check returns (name, status, detail) with status ok | warn | fail. See docs/SECURITY.md for
+Each check returns (name, status, detail) with status ok | warn | fail. See docs/HELIOS_SECURITY.md for
 what each protection does and where it is enforced.
 """
 
