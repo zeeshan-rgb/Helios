@@ -406,42 +406,113 @@
         ` · last scanned ${r.last ? ago(r.last) : "never"}</div><div class="cs" title="${e(r.categories)}">${e(r.categories)}</div></div>`;
     }).join("") + `<div class="covnote">Searched OpenStreetMap only — it doesn't list every business, so this is never "everything in the area".</div>`;
   }
+  // Business discovery map — a real OpenStreetMap basemap (Leaflet) with businesses plotted as
+  // pins coloured by category family and ringed by lead priority. Only businesses OSM listed in
+  // the searched cells are shown, and the searched cells are drawn, so it never implies a full map.
+  const CAT_GROUP = { restaurant: "food", bakery: "food", hospitality: "food",
+    clinic: "health", dentist: "health", retail: "retail", salon: "retail",
+    repair: "services", fitness: "services", education: "services", professional: "services", workshop: "services" };
+  const GROUP = { food: { label: "Food", color: "#ff6b81" }, health: { label: "Health", color: "#b78cff" },
+    retail: { label: "Retail", color: "#3ddc97" }, services: { label: "Services", color: "#4aa8ff" },
+    other: { label: "Other", color: "#9aa7bd" } };
+  const groupOf = c => CAT_GROUP[String(c || "").toLowerCase()] || "other";
+  const PRING = { A: { r: 8, w: 2.6, o: 1 }, B: { r: 6.5, w: 1.8, o: .95 }, C: { r: 5, w: 1.2, o: .9 } };
+
+  let lmap = null, lPins = null, lCells = null, mapRaw = null, mapFit = false;
+  function initMap() {
+    if (lmap) return lmap;
+    if (typeof L === "undefined") { g("mapbox").innerHTML = `<div class="empty-note" style="padding-top:70px">The map library didn't load.</div>`; return null; }
+    lmap = L.map("mapbox", { zoomControl: true, attributionControl: false, worldCopyJump: true,
+      minZoom: 2, zoomSnap: .5 }).setView([17.43, 78.45], 11);   // default: Hyderabad (SVG markers: CSS hover/select)
+    L.control.attribution({ position: "bottomright", prefix: false }).addTo(lmap);
+    // OpenStreetMap's own raster tiles (reliable + free + on-brand), darkened with a CSS filter on
+    // .leaflet-tile — so the basemap matches the dark UI without depending on a themed tile provider.
+    const base = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors", crossOrigin: true });
+    let tileErrs = 0;
+    base.on("tileerror", () => { if (++tileErrs === 6) g("mapbox").classList.add("tiles-off"); });   // offline: dark canvas, pins still show
+    base.addTo(lmap);
+    lCells = L.layerGroup().addTo(lmap);
+    lPins = L.layerGroup().addTo(lmap);
+    setTimeout(() => lmap && lmap.invalidateSize(), 60);
+    return lmap;
+  }
   async function loadMap() {
     let m; try { m = await getJSON("/dashboard/map"); } catch { return; }
-    renderMap(m);
+    mapRaw = m;
+    g("mapattr").textContent = "Data " + (m.attribution || "");
+    g("mapnote").textContent = m.note || "";
+    buildLegend();
+    buildCatOptions(m.points || []);
+    if (!initMap()) return;
+    renderMap();
   }
-  function renderMap(m) {
-    const box = g("mapbox");
-    const pts = m.points || [], cells = m.cells || [];
-    g("mapattr").textContent = (pts.length || cells.length) ? "Data " + (m.attribution || "") : "";
-    if (!pts.length && !cells.length) {
-      box.innerHTML = `<div class="empty-note" style="padding-top:70px">Nothing plotted yet.<br>Scanned businesses and the cells searched will appear here.</div>`; return;
-    }
-    let s = 90, n = -90, w = 180, ea = -180;
-    const take = (la, lo) => { s = Math.min(s, la); n = Math.max(n, la); w = Math.min(w, lo); ea = Math.max(ea, lo); };
-    cells.forEach(c => { take(c.s, c.w); take(c.n, c.e); }); pts.forEach(p => take(p.lat, p.lon));
-    const W = 600, H = 230, pad = 18, k = Math.cos(((s + n) / 2) * Math.PI / 180);
-    const spanX = Math.max(1e-4, (ea - w) * k), spanY = Math.max(1e-4, n - s);
-    const sc = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
-    const ox = (W - spanX * sc) / 2, oy = (H - spanY * sc) / 2;
-    const X = lo => ox + (lo - w) * k * sc, Y = la => oy + (n - la) * sc;
-    let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Plot of scanned businesses">`;
-    for (let x = 0; x <= W; x += 50) svg += `<line class="gridl" x1="${x}" y1="0" x2="${x}" y2="${H}"/>`;
-    for (let y = 0; y <= H; y += 46) svg += `<line class="gridl" x1="0" y1="${y}" x2="${W}" y2="${y}"/>`;
-    cells.forEach(c => {
-      svg += `<rect class="mcell ${c.status === "done" ? "" : e(c.status)}" x="${X(c.w).toFixed(1)}" y="${Y(c.n).toFixed(1)}" width="${Math.max(2, (X(c.e) - X(c.w))).toFixed(1)}" height="${Math.max(2, (Y(c.s) - Y(c.n))).toFixed(1)}">` +
-        `<title>${e(c.area)} · ${e(c.status)} · ${c.candidates} businesses</title></rect>`;
+  function buildLegend() {
+    g("maplegend").innerHTML = Object.values(GROUP).map(gr =>
+      `<span class="lchip"><i style="background:${gr.color}"></i>${e(gr.label)}</span>`).join("") +
+      `<span class="lchip"><i class="cellchip"></i>cell searched</span>`;
+  }
+  function buildCatOptions(pts) {
+    const sel = g("mapcat"), cur = sel.value;
+    const present = [...new Set(pts.map(p => groupOf(p.cat)))];
+    const order = ["food", "health", "retail", "services", "other"].filter(k => present.includes(k));
+    sel.innerHTML = `<option value="">All categories</option>` +
+      order.map(k => `<option value="${k}">${e(GROUP[k].label)}</option>`).join("");
+    if (order.includes(cur)) sel.value = cur;
+  }
+  function mapFilter() {
+    const q = (g("mapsearch").value || "").trim().toLowerCase();
+    const cat = g("mapcat").value;
+    return (mapRaw.points || []).filter(p =>
+      (!cat || groupOf(p.cat) === cat) &&
+      (!q || `${p.name} ${p.category} ${p.area}`.toLowerCase().includes(q)));
+  }
+  function renderMap(fitTo) {
+    if (!lmap) return;
+    lPins.clearLayers(); lCells.clearLayers();
+    (mapRaw.cells || []).forEach(c => {
+      const done = c.status === "done";
+      L.rectangle([[c.s, c.w], [c.n, c.e]], { className: "mcell-" + (done ? "done" : "pending"),
+        color: done ? "#36c5f0" : "#6b7a99", weight: 1, opacity: done ? .7 : .45,
+        fill: done, fillColor: "#36c5f0", fillOpacity: done ? .07 : 0,
+        dashArray: done ? null : "5 4", interactive: false }).addTo(lCells);
     });
+    const pts = mapFilter();
+    const bounds = [];
     pts.forEach(p => {
-      svg += `<circle class="mpt ${e(p.priority || "X")}${p.id === selId ? " sel" : ""}" data-id="${p.id}" cx="${X(p.lon).toFixed(1)}" cy="${Y(p.lat).toFixed(1)}" r="${p.id === selId ? 7 : 5}">` +
-        `<title>${e(p.name)} — ${e(p.category)} · priority ${e(p.priority || "?")}</title></circle>`;
+      const col = GROUP[groupOf(p.cat)].color;
+      const pr = PRING[p.priority] || { r: 4.5, w: 1, o: .85 };
+      const sel = p.id === selId;
+      const mk = L.circleMarker([p.lat, p.lon], { radius: sel ? pr.r + 2 : pr.r,
+        color: sel ? "#fff" : "rgba(255,255,255,.85)", weight: sel ? 3 : pr.w,
+        fillColor: col, fillOpacity: pr.o, className: "mpt" + (sel ? " sel" : "") });
+      mk.bindTooltip(`<b>${e(p.name)}</b><span>${e(p.category)}${p.area ? " · " + e(p.area) : ""}</span>` +
+        `<span>Priority ${e(p.priority || "?")}${p.website === "none" ? " · no website" : ""}</span>`,
+        { className: "mtt", direction: "top", offset: [0, -4], opacity: 1 });
+      mk.on("click", () => { selectProspect(p.id); openRp(); });
+      mk.addTo(lPins);
+      bounds.push([p.lat, p.lon]);
     });
-    svg += `</svg><div class="mapnote">${e(m.note || "")}</div>`;
-    box.innerHTML = svg;
+    (mapRaw.cells || []).forEach(c => { bounds.push([c.s, c.w], [c.n, c.e]); });
+    const has = pts.length || (mapRaw.cells || []).length;
+    g("mapempty").classList.toggle("hidden", !!has);
+    if (!has) g("mapempty").innerHTML = `Nothing plotted yet.<br><span class="muted small">Businesses and the cells searched appear here once prospecting runs.</span>`;
+    if ((fitTo || !mapFit) && bounds.length) { lmap.fitBounds(bounds, { padding: [28, 28], maxZoom: 15 }); mapFit = true; }
   }
-  g("mapbox").addEventListener("click", ev => {
-    const c = ev.target.closest(".mpt"); if (c) { selectProspect(+c.dataset.id); openRp(); }
+  let mapSearchT = 0;
+  g("mapsearch").addEventListener("input", () => { clearTimeout(mapSearchT); mapSearchT = setTimeout(() => renderMap(true), 220); });
+  g("mapcat").addEventListener("change", () => renderMap(true));
+  g("mapfit").addEventListener("click", () => renderMap(true));
+  g("mapfull").addEventListener("click", () => {
+    const card = g("mapcard"); card.classList.toggle("mapfull");
+    document.body.classList.toggle("has-mapfull", card.classList.contains("mapfull"));
+    setTimeout(() => { if (lmap) { lmap.invalidateSize(); renderMap(true); } }, 80);
   });
+  document.addEventListener("keydown", ev => {
+    if (ev.key === "Escape" && g("mapcard").classList.contains("mapfull")) g("mapfull").click();
+  });
+  let mapRz = 0;
+  window.addEventListener("resize", () => { clearTimeout(mapRz); mapRz = setTimeout(() => { if (lmap) lmap.invalidateSize(); }, 200); });
 
   // ------------------------------------------------------------------ research + activity + upcoming
   async function loadActivity() {
@@ -473,7 +544,7 @@
   async function selectProspect(id, quiet) {
     selId = id;
     document.querySelectorAll("#lbody tr").forEach(tr => tr.classList.toggle("sel", +tr.dataset.id === id));
-    document.querySelectorAll(".mpt").forEach(c => { const on = +c.dataset.id === id; c.classList.toggle("sel", on); c.setAttribute("r", on ? 7 : 5); });
+    if (lmap && mapRaw) renderMap();   // re-highlight the selected pin (canvas markers aren't DOM nodes)
     document.querySelectorAll(".qa[data-qa=quote]").forEach(b => { b.disabled = false; });
     try { cur = await getJSON("/dashboard/prospect?id=" + encodeURIComponent(id)); }
     catch (err) { if (!quiet) toast("Couldn't load that business (" + err.message + ")", "err"); return; }

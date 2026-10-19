@@ -369,11 +369,24 @@ def business(limit: int = 500) -> list[dict]:
 
 
 def map_data() -> dict:
-    """Plotted businesses + the OSM cells actually searched. No basemap tiles are fetched; the UI
-    draws a schematic plot, so it never looks like a complete map of an area."""
-    from .prospecting import geo, store
+    """Plotted businesses + the OSM cells actually searched, for the dashboard's real (Leaflet) map.
+    Only businesses OSM listed in the searched cells are returned — the UI keeps that note and the
+    searched-cell overlay so a real basemap never implies "every business in the area"."""
+    from .prospecting import geo, scoring, store
     from . import db
-    pts = [r for r in business() if r["lat"] is not None and r["lon"] is not None and r["status"] not in _ACTIVE_OUT]
+
+    def _points():
+        out = []
+        for p in store.list_prospects(limit=2000):
+            if p.get("lat") is None or p.get("lon") is None or p["status"] in _ACTIVE_OUT:
+                continue
+            out.append({"id": p["id"], "name": p["name"], "lat": p["lat"], "lon": p["lon"],
+                        "priority": p.get("priority") or "", "status": p["status"],
+                        "cat": (p.get("category") or "").lower(), "category": scoring.label(p.get("category") or ""),
+                        "area": (p.get("area") or "").split(",")[0],
+                        "website": "ok" if p.get("website") else ("none" if p.get("website_status") == "none" else "")})
+        return out
+    pts = _safe(_points, [])
     cells = []
 
     def _cells():
@@ -387,8 +400,7 @@ def map_data() -> dict:
                           "status": r["status"], "candidates": r["candidates"]})
         except (ValueError, AttributeError):
             continue
-    return {"points": [{k: r[k] for k in ("id", "name", "lat", "lon", "priority", "status", "category")} for r in pts],
-            "cells": cells, "attribution": geo.ATTRIBUTION,
+    return {"points": pts, "cells": cells, "attribution": geo.ATTRIBUTION,
             "note": "Only businesses OpenStreetMap lists in the cells searched so far. OSM doesn't list every business."}
 
 

@@ -7,8 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=0.14.0" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=0.14.0" />
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css?v=1.9.4" />
+  <link rel="stylesheet" href="/static/style.css?v=0.15.0" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=0.15.0" />
 </head>
 <body>
   <!-- Holographic open-animation overlay (cyan scan line + edge glow + CRT grid). Inert
@@ -255,9 +256,27 @@
           </section>
 
           <section class="dcard" id="mapcard">
-            <header class="chead"><h3>Business discovery map</h3><span class="csub">Schematic plot · no map tiles</span></header>
-            <div id="mapbox" class="mapbox"></div>
-            <footer class="cfoot mapfoot"><span class="legend"><i class="pa"></i>A <i class="pb"></i>B <i class="pc"></i>C <i class="cell"></i>cell searched</span><span id="mapattr" class="muted small"></span></footer>
+            <header class="chead maphead">
+              <div class="chead-t"><h3>Business discovery map</h3><span class="csub">OpenStreetMap · only businesses in searched cells</span></div>
+              <div class="maptools">
+                <label class="mapsearch">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+                  <input id="mapsearch" type="search" placeholder="Search business, category or area…" autocomplete="off" spellcheck="false" />
+                </label>
+                <select id="mapcat" class="mapsel" aria-label="Filter by category"><option value="">All categories</option></select>
+                <button id="mapfit" class="iconbtn" title="Fit to results" aria-label="Fit to results"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+                <button id="mapfull" class="iconbtn" title="Fullscreen" aria-label="Toggle fullscreen"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button>
+              </div>
+            </header>
+            <div class="mapwrap">
+              <div id="mapbox" class="mapbox"></div>
+              <div id="mapempty" class="mapempty hidden"></div>
+            </div>
+            <footer class="cfoot mapfoot">
+              <span class="legend" id="maplegend"></span>
+              <span id="mapattr" class="muted small"></span>
+            </footer>
+            <p id="mapnote" class="mapnote2 muted small"></p>
           </section>
 
           <section class="dcard" id="covcard">
@@ -519,8 +538,9 @@
   {"imports": {"three": "/static/vendor/three170/three.module.min.js",
                "three/addons/": "/static/vendor/three170/addons/"}}
   </script>
-  <script src="/static/app.js?v=0.14.0"></script>
-  <script src="/static/dashboard.js?v=0.14.0"></script>
+  <script src="/static/app.js?v=0.15.0"></script>
+  <script src="/static/vendor/leaflet/leaflet.js?v=1.9.4"></script>
+  <script src="/static/dashboard.js?v=0.15.0"></script>
   <script type="module" src="/static/viewer.js?v=0.10.0"></script>
 </body>
 </html>

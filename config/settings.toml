@@ -120,7 +120,7 @@ open_on_wake = ["spotify"]     # apps/URIs to launch on wake (the dashboard alwa
                                # "spotify" is only opened if Spotify is actually connected (the
                                # one-time OAuth via setup / tools/spotify_auth.py) — otherwise it's
                                # skipped, so a fresh install doesn't pop Spotify open on every wake.
-clap_sensitivity = 0.15        # min loudness of EACH clap (0.06 very sensitive .. 0.35 needs a
+clap_sensitivity = 0.2        # min loudness of EACH clap (0.06 very sensitive .. 0.35 needs a
                                # loud clap); one of the two must reach ~1.7x this. A clap must
                                # also be sharp (gone within 0.15s), so speech/music/TV don't count.
                                # Raise it if background noise still wakes Helios; lower it if your
@@ -209,7 +209,7 @@ barge_threshold = 0.6      # stricter wake bar WHILE speaking (the open mic hear
 dictation_hotkey = "<ctrl>+<alt>+d"   # push-to-talk: transcribe speech into the focused field
 talk_hotkey = "<ctrl>+<alt>+h"        # talk to Helios: same as saying "hey Helios" (chime, then speak)
 listen_sec = 8             # after a wake word / clap / talk key: seconds to wait for you to start
-muted = true
+muted = false
 
 [voice.stt]
 # Speech-to-text (faster-whisper). These override the older flat stt_* keys above, which still work.
