@@ -209,7 +209,7 @@ barge_threshold = 0.6      # stricter wake bar WHILE speaking (the open mic hear
 dictation_hotkey = "<ctrl>+<alt>+d"   # push-to-talk: transcribe speech into the focused field
 talk_hotkey = "<ctrl>+<alt>+h"        # talk to Helios: same as saying "hey Helios" (chime, then speak)
 listen_sec = 8             # after a wake word / clap / talk key: seconds to wait for you to start
-muted = false
+muted = true
 
 [voice.stt]
 # Speech-to-text (faster-whisper). These override the older flat stt_* keys above, which still work.

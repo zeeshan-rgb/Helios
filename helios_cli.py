@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Helios command line â€” `helios <command>`.
+"""Helios command line - `helios <command>`.
 
 Installed on PATH by install.ps1 as a thin shim (bin/helios.cmd) that runs this file with the
 install's own venv Python, so all deps are importable. Keep this dependency-light at import time.
@@ -25,7 +25,7 @@ import tempfile
 import time
 from pathlib import Path
 
-# Windows consoles default to cp1252, which can't encode the status glyphs (â— â—‹) we print â€” make
+# Windows consoles default to cp1252, which can't encode the status glyphs (* o) we print - make
 # stdout/stderr UTF-8 so `helios status`/`start` don't crash with UnicodeEncodeError.
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -64,9 +64,9 @@ def cmd_onboard(_args) -> int:
 
 def cmd_status(_args) -> int:
     if _is_running():
-        print(f"â— Helios is running at {_conf().BASE_URL}")
+        print(f"* Helios is running at {_conf().BASE_URL}")
         return 0
-    print("â—‹ Helios is not running.")
+    print("o Helios is not running.")
     return 1
 
 
@@ -79,7 +79,7 @@ def cmd_start(_args) -> int:
         return 1
     subprocess.Popen([str(VENV_PYW), str(REPO / "run_helios.pyw")],
                      cwd=str(REPO), creationflags=_NO_WINDOW, close_fds=True)
-    print("Starting Heliosâ€¦  (summon with Ctrl+Alt+J)")
+    print("Starting Helios...  (summon with Ctrl+Alt+J)")
     return 0
 
 
@@ -99,7 +99,7 @@ def cmd_stop(_args) -> int:
     if not _is_running():
         print("Helios stopped.")
         return 0
-    print("Couldn't confirm shutdown â€” it may still be closing.")
+    print("Couldn't confirm shutdown - it may still be closing.")
     return 1
 
 
@@ -304,7 +304,7 @@ def _spawn_self_delete(root: Path) -> None:
 
 def cmd_uninstall(args) -> int:
     args = args or []
-    # Safety: never delete a dev checkout â€” uninstall is only for installs created by install.ps1.
+    # Safety: never delete a dev checkout - uninstall is only for installs created by install.ps1.
     if (REPO / ".git").is_dir():
         print("Refusing to uninstall: this looks like a development checkout (.git present), not an")
         print(f"installed copy. `helios uninstall` is for installs from install.ps1.\n    {REPO}")
@@ -365,10 +365,10 @@ def cmd_uninstall(args) -> int:
 def _update_git() -> int:
     """Update a source (git) checkout: fast-forward pull, preserving the user's settings.toml
     (it's tracked but locally edited via the settings UI). Refuses SAFELY if the working tree has
-    other uncommitted changes or has diverged from the remote â€” the user commits/stashes and retries."""
+    other uncommitted changes or has diverged from the remote - the user commits/stashes and retries."""
     git = shutil.which("git")
     if not git:
-        print("! git not found on PATH â€” can't update a source checkout. Install Git, or reinstall.")
+        print("! git not found on PATH - can't update a source checkout. Install Git, or reinstall.")
         return 1
     settings = REPO / "config" / "settings.toml"
     backup = None
@@ -378,7 +378,7 @@ def _update_git() -> int:
         shutil.copyfile(settings, backup)
         # Revert local settings edits so the fast-forward pull isn't blocked by them.
         subprocess.run([git, "-C", str(REPO), "checkout", "--", "config/settings.toml"])
-    print("Fetching latestâ€¦")
+    print("Fetching latest...")
     rc = subprocess.run([git, "-C", str(REPO), "pull", "--ff-only"]).returncode
     if rc != 0:
         if backup:
@@ -396,7 +396,7 @@ def _update_git() -> int:
             shutil.copyfile(backup, settings)   # merge failed -> keep the user's settings verbatim
         os.remove(backup)
     if VENV_PY.exists():
-        print("Updating dependenciesâ€¦")
+        print("Updating dependencies...")
         subprocess.run([str(VENV_PY), "-m", "pip", "install", "-r", str(REPO / "requirements.txt")])
     return 0
 
@@ -408,7 +408,7 @@ def _update_installer() -> int:
     repo_dir = str(REPO).replace("'", "''")
     ps = ("$env:HELIOS_DIR='" + repo_dir + "'; $env:HELIOS_BRANCH='" + branch + "';"
           "irm https://raw.githubusercontent.com/NotTimPunt/jarvis/" + branch + "/install.ps1 | iex")
-    print(f"Re-running the installer (branch '{branch}')â€¦")
+    print(f"Re-running the installer (branch '{branch}')...")
     return subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                            "-Command", ps]).returncode
 
@@ -420,7 +420,7 @@ def cmd_update(_args) -> int:
     repo via your git auth); a zip install re-runs install.ps1. Helios is stopped first so no
     files/DLLs are locked during the update."""
     was_running = _is_running()
-    print("Stopping Heliosâ€¦")
+    print("Stopping Helios...")
     try:
         cmd_stop(None)
     except Exception:
@@ -431,7 +431,7 @@ def cmd_update(_args) -> int:
     is_git = (REPO / ".git").is_dir()
     rc = _update_git() if is_git else _update_installer()
     if rc != 0:
-        print("Update failed â€” Helios was NOT restarted.")
+        print("Update failed - Helios was NOT restarted.")
         return rc
 
     print("Update complete.")
@@ -1196,7 +1196,7 @@ _COMMANDS = {
     "telegram": cmd_telegram,
 }
 
-_USAGE = ("Helios â€” usage: helios <command>\n"
+_USAGE = ("Helios - usage: helios <command>\n"
           "  onboard   run the setup wizard (connect a brain, voice, apps)\n"
           "  start     launch Helios in the background\n"
           "  stop      ask Helios to quit\n"
