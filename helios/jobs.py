@@ -237,6 +237,16 @@ def _finish_run(job: dict, run_id: int, status: str, summary: str,
         _notify(f"Helios paused the job '{job['name']}' after {fails} failures in a row.", emit)
     _update(job["id"], **fields)
     conf.log("jobs", f"{job['name']}: {status} — {summary[:160]}")
+    if status == "failed" and fails >= 2:          # repeated failure → the owner hears about it once
+        try:
+            from . import executive
+            paused = fails >= PAUSE_AFTER_FAILURES and not job.get("system")
+            executive.emit("jobs", "job_failing", "HIGH",
+                           f"Job '{job['name']}' failed {fails} times in a row" + (" — paused" if paused else ""),
+                           detail=summary[:500], related=f"job:{job['name']}",
+                           action=f"check `helios jobs history {job['name']}`", dedupe_key=f"job_failing:{job['name']}")
+        except Exception as e:  # pragma: no cover
+            conf.log("jobs", f"executive event failed: {e}")
 
 
 def _notify(msg: str, emit=None) -> None:

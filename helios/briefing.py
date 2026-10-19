@@ -144,6 +144,17 @@ def build(now: datetime | None = None, rec: dict | None = None) -> dict:
     b["prospects"] = {"status": bp.get("status", "not run"), "summary": bp.get("summary", ""),
                       **(bp.get("data") or {})}
 
+    # Executive reporting: the business pipeline of the last 24 h + what's waiting for a decision.
+    try:
+        from . import executive
+        b["pipeline"] = executive.business(now - timedelta(hours=24), now)
+    except Exception as e:
+        b["pipeline"] = {"error": str(e)[:160]}
+    try:
+        from . import executive
+        b["decisions"] = executive.decisions()
+    except Exception:
+        b["decisions"] = []
     tasks = (rec or {}).get("tasks") or {}
     b["n_tasks"] = len(tasks)
     b["skipped"] = [{"task": n, "why": t.get("summary", "")} for n, t in tasks.items() if t.get("status") == "skipped"]
@@ -248,6 +259,24 @@ def render(b: dict) -> str:
         else:
             out.append(f"- {bp.get('status')}: {bp.get('summary') or 'did not run'}")
         out.append("")
+    pl = b.get("pipeline") or {}
+    if pl.get("error"):
+        out += ["## Business pipeline", "", f"- couldn't read the prospect store: {pl['error']}", ""]
+    elif pl:
+        out += ["## Business pipeline (last 24 hours)", "",
+                f"- Discovered {pl['discovered']} · researched {pl['researched']} · qualified {pl['qualified']}",
+                f"- No website (verified): {pl['no_website_verified']} · redesign opportunities: {pl['redesign']} · "
+                f"strong AI opportunities: {pl['strong_ai']}",
+                f"- Drafts awaiting your approval: {pl['drafted']} · quotes needing pricing: {pl['needs_pricing']} — "
+                "nothing has been sent", ""]
+        out += [f"    - {t['name']} ({t['category']}, {t['area']}) — {t['why'] or 'opportunity'}; "
+                f"{t['package'] or 'no package'}; {t['price'] or '—'} · `helios prospects show {t['id']}`"
+                for t in (pl.get("top") or [])[:3]]
+        if pl.get("top"):
+            out.append("")
+    if b.get("decisions"):
+        out += ["## Needs your decision", ""] + [f"- {d['what']}" + (f" — {d['how']}" if d.get("how") else "")
+                                                 for d in b["decisions"][:_MAX_ITEMS]] + [""]
     out += ["## Needs your approval", ""]
     if b["pending"]:
         out += [f"- {p['category'][:-1]}: {p['text']}" + (f" (said {p['seen']}x)" if p["seen"] > 1 else "")
@@ -348,6 +377,16 @@ def spoken(b: dict) -> str:
     failed = [f for f in b["sections"].get("failed", []) if "task failed" in f]
     if b["night_status"].startswith("completed"):
         parts.append("Nothing failed." if not failed else "The details are in the report.")
+    pl = b.get("pipeline") or {}
+    if pl.get("qualified") and not (bp.get("status") == "ok" and bp.get("qualified")):
+        parts.append(f"In the last day I qualified {pl['qualified']} business lead{'s' if pl['qualified'] != 1 else ''}"
+                     + (f"; {pl['drafted']} draft{'s are' if pl['drafted'] != 1 else ' is'} ready for review. Nothing "
+                        "has been sent." if pl.get("drafted") else "."))
+    n_dec = len(b.get("decisions") or [])
+    if n_dec:
+        parts.append(f"I need your decision on {n_dec} item{'s' if n_dec != 1 else ''}.")
+        if pl.get("top") and failed:
+            parts.append("Would you like the leads first, or the problems?")
     return " ".join(parts)
 
 
@@ -383,6 +422,13 @@ def tick(now: datetime | None = None, emit=None) -> str:
                  "night_status": out["briefing"]["night_status"],
                  "spoken_text": out["spoken"], "spoken": False, "path": out["path"]}
     _save_state(st)
+    try:                                   # executive reporting: record it + the optional morning call
+        from . import calling, executive
+        executive.record("morning", now - timedelta(hours=24), now, out["path"], out["spoken"])
+        if calling.wants_call_for_report("morning"):
+            calling.schedule(reason="Morning briefing", report_kind="morning", now=now)
+    except Exception as e:  # pragma: no cover
+        conf.log("briefing", f"executive record / call failed: {e}")
     try:
         from . import jobs
         jobs.record_system_run("morning_briefing", "ok",

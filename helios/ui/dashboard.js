@@ -63,8 +63,9 @@
   const tiny = () => window.matchMedia("(max-width: 1023px)").matches;
   const STATUS_LABEL = { DRAFTED: "To approve", QUALIFIED: "Qualified", APPROVED: "Approved", CONTACTED: "Contacted",
     REPLIED: "Replied", INTERESTED: "Interested", NOT_INTERESTED: "Not interested", CLOSED: "Closed",
-    REJECTED: "Rejected", ARCHIVED: "Archived", NEW: "New", RESEARCHED: "Researched" };
-  const CONTACTED = ["CONTACTED", "REPLIED", "INTERESTED", "NOT_INTERESTED", "CLOSED"];
+    REJECTED: "Rejected", ARCHIVED: "Archived", NEW: "New", RESEARCHED: "Researched",
+    PROPOSAL_ACCEPTED: "Proposal accepted", WON: "Won", LOST: "Lost" };
+  const CONTACTED = ["CONTACTED", "REPLIED", "INTERESTED", "NOT_INTERESTED", "CLOSED", "PROPOSAL_ACCEPTED", "WON", "LOST"];
 
   // ------------------------------------------------------------------ views + drawers
   function showView(v) {
@@ -640,6 +641,68 @@
     let d; try { d = await getJSON("/dashboard/report"); } catch (err) { el.innerHTML = `<div class="infopane"><div class="empty-note">Couldn't load (${e(err.message)})</div></div>`; return; }
     el.innerHTML = `<div class="infopane"><pre>${e(d.text || "No night report yet.")}</pre></div>`;
   }
+  // Reports / Executive Overview: pipeline, decisions, events (severity, delivered vs reviewed),
+  // report history and phone calls — all from /dashboard/exec (executive.py + calling.py records).
+  const exState = { range: "today", cat: "all", from: "", to: "" };
+  async function openExec() {
+    setNav("reports");
+    const el = infoPane("Reports & executive overview", `<div class="skel"></div><div class="skel"></div>`);
+    const qs = new URLSearchParams({ range: exState.range, cat: exState.cat, from: exState.from, to: exState.to });
+    let d; try { d = await getJSON("/dashboard/exec?" + qs); }
+    catch (err) { el.innerHTML = `<div class="infopane"><div class="empty-note">Couldn't load (${e(err.message)})</div></div>`; return; }
+    const p = d.pipeline || {}, c = d.calling || {};
+    const opt = (v, cur, label) => `<option value="${v}"${v === cur ? " selected" : ""}>${label}</option>`;
+    const stat = (n, l) => `<div class="exstat"><b>${e(n ?? "—")}</b><span>${e(l)}</span></div>`;
+    el.innerHTML = `<div class="infopane">` +
+      `<div class="exfilters"><select id="ex_range">${opt("today", exState.range, "Today")}${opt("yesterday", exState.range, "Yesterday")}` +
+      `${opt("7d", exState.range, "Last 7 days")}${opt("custom", exState.range, "Custom…")}</select>` +
+      (exState.range === "custom" ? `<input type="date" id="ex_from" value="${e(exState.from)}"><input type="date" id="ex_to" value="${e(exState.to)}">` : "") +
+      `<select id="ex_cat">${["all", "business", "research", "projects", "night", "jobs", "system", "approvals", "failures", "calls"]
+        .map(k => opt(k, exState.cat, k[0].toUpperCase() + k.slice(1))).join("")}</select></div>` +
+      `<h5>Business pipeline</h5><div class="exstats">${stat(p.discovered, "discovered")}${stat(p.researched, "researched")}` +
+      `${stat(p.qualified, "qualified")}${stat(p.no_website_verified, "no website (verified)")}${stat(p.redesign, "redesign")}` +
+      `${stat(p.strong_ai, "strong AI")}${stat(p.drafted, "drafts to approve")}${stat(p.needs_pricing, "need pricing")}` +
+      `${stat(p.contacted_in_period, "contacted (verified)")}${stat(p.replies, "replies")}${stat(p.won, "won")}</div>` +
+      `<div class="safe">Leads and proposals are not revenue. Nothing is sent without your approval.</div>` +
+      ((p.top || []).length ? `<h5>Best opportunities</h5>` + p.top.map(t => `<div class="kv"><span>${e(t.name)} · ${e(t.category)}</span><b>${e(t.why || "—")} · ${e(t.price || "—")}</b></div>`).join("") : "") +
+      `<h5>Waiting for your decision</h5>` + ((d.decisions || []).length ? (d.decisions).map(x => `<div class="kv"><span>${e(x.what)}</span><b class="na">${e(x.how || "")}</b></div>`).join("")
+        : `<div class="empty-note">Nothing is waiting for you.</div>`) +
+      `<h5>Events · ${d.unacked || 0} unreviewed${d.snoozed_until ? " · snoozed until " + e(hm(d.snoozed_until)) : ""}</h5>` +
+      ((d.events || []).length ? d.events.map(ev => `<div class="exev${ev.acknowledged ? " acked" : ""}"><span class="sev ${e(ev.severity)}">${e(ev.severity)}</span>` +
+        `<div class="what">${e(ev.summary)}${ev.count > 1 ? ` <span class="meta">×${ev.count}</span>` : ""}<div class="meta">${e(ev.source)} · ${ago(ev.last_seen)} · ` +
+        `${e(ev.state)}${Object.entries(ev.delivery || {}).map(([k, v]) => ` · ${e(k)}: ${e(v.status)}`).join("")}${ev.acknowledged ? " · reviewed" : ""}</div></div>` +
+        (ev.acknowledged ? "" : `<button class="ghost" data-ack="${e(ev.id)}">Reviewed</button>`) + `</div>`).join("")
+        : `<div class="empty-note">No events in this period.</div>`) +
+      `<div class="row"><button class="ghost" id="ex_ackall">Mark all reviewed</button><button class="ghost" id="ex_snz">${d.snoozed_until ? "Cancel snooze" : "Snooze 2 h"}</button></div>` +
+      `<h5>Reports</h5>` + ((d.reports || []).length ? d.reports.map(r => `<div class="kv exrep" data-rep="${r.id}"><span>${e(r.kind)} · ${e(when(r.created))}</span><b>${e((r.summary || "").slice(0, 80))}</b></div>`).join("")
+        : `<div class="empty-note">No reports in this period.</div>`) +
+      `<div class="row">${["midday", "eod", "weekly"].map(k => `<button class="ghost" data-build="${k}">${{ midday: "Midday", eod: "End of day", weekly: "Weekly" }[k]} report now</button>`).join("")}</div>` +
+      `<h5>Phone briefings</h5><div class="kv"><span>Status</span><b class="${c.ready ? "ok" : "na"}">${c.ready ? "ready · " + e((c.numbers || []).join(", ")) : "not set up"}</b></div>` +
+      (c.reasons || []).map(r => `<div class="safe">${e(r)}</div>`).join("") +
+      ((d.calls || []).length ? d.calls.slice(0, 12).map(x => `<div class="kv"><span>#${x.id} ${e(when(x.due))} · ${e(x.reason)}</span><b class="${x.status === "completed" ? "ok" : ["failed", "refused", "no-answer", "busy"].includes(x.status) ? "bad" : ""}">${e(x.status)}` +
+        `${x.status === "scheduled" ? ` <button class="ghost" data-cancel="${x.id}">Cancel</button>` : ""}</b></div>`).join("") : "") +
+      `<div class="help">${e(c.two_way_note || "")}. Schedule: midday ${e((d.schedule || {}).midday_time)}, end of day ${e((d.schedule || {}).eod_time)}, ` +
+      `weekly ${e((d.schedule || {}).weekly_day)} ${e((d.schedule || {}).weekly_time)}; quiet hours ${e((d.schedule || {}).quiet_hours_start)}–${e((d.schedule || {}).quiet_hours_end)}.</div></div>`;
+    const re = () => openExec();
+    const act = async (body, msg) => { try { await postJSON("/exec/action", body); if (msg) toast(msg, "ok"); re(); } catch (err) { toast(err.message, "err"); } };
+    el.querySelector("#ex_range").addEventListener("change", ev => { exState.range = ev.target.value; re(); });
+    el.querySelector("#ex_cat").addEventListener("change", ev => { exState.cat = ev.target.value; re(); });
+    ["ex_from", "ex_to"].forEach(id => { const i = el.querySelector("#" + id); if (i) i.addEventListener("change", ev => { exState[id.slice(3)] = ev.target.value; if (exState.from && exState.to) re(); }); });
+    el.querySelectorAll("[data-ack]").forEach(b => b.addEventListener("click", () => act({ action: "ack", ids: [b.dataset.ack] })));
+    el.querySelector("#ex_ackall").addEventListener("click", () => act({ action: "ack_all" }, "All events marked reviewed"));
+    el.querySelector("#ex_snz").addEventListener("click", () => act({ action: "snooze", hours: d.snoozed_until ? 0 : 2 }, d.snoozed_until ? "Snooze cancelled" : "Non-critical notifications held for 2 h"));
+    el.querySelectorAll("[data-cancel]").forEach(b => b.addEventListener("click", () => { if (window.confirm("Cancel this call?")) act({ action: "cancel_call", id: +b.dataset.cancel }, "Call cancelled"); }));
+    el.querySelectorAll("[data-rep]").forEach(r => r.addEventListener("click", async () => {
+      try { const x = await getJSON("/dashboard/exec_report?id=" + r.dataset.rep); infoPane("Report", `<pre>${e(x.text)}</pre><div class="row"><button class="ghost" id="ex_back">Back</button></div>`).querySelector("#ex_back").addEventListener("click", re); }
+      catch (err) { toast(err.message, "err"); }
+    }));
+    el.querySelectorAll("[data-build]").forEach(b => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { const x = await postJSON("/exec/action", { action: "build", kind: b.dataset.build });
+        infoPane("Report (preview — not saved or sent)", `<pre>${e(x.text)}</pre><div class="row"><button class="ghost" id="ex_back">Back</button></div>`).querySelector("#ex_back").addEventListener("click", re); }
+      catch (err) { toast(err.message, "err"); b.disabled = false; }
+    }));
+  }
   async function openInsights() {
     const el = infoPane("AI insights", `<div class="skel"></div>`);
     if (!limitsData) await loadLimits(false);
@@ -665,6 +728,7 @@
     else if (id === "research") { setNav("research"); showView("home"); g("rescard").scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" }); }
     else if (id === "leads") { setNav("leads"); g("prospectbtn").click(); }
     else if (id === "projects") openProjects();
+    else if (id === "reports") openExec();
     else if (id === "settings") { setNav("settings"); g("setbtn").click(); }
     else openModule(id, label);
   }));
@@ -720,7 +784,7 @@
       if (!selId) { toast("Pick a business first (Top leads or the map).", "err"); return; }
       openRp(); const s = g("pkgsec"); if (s) { s.scrollIntoView({ block: "nearest" }); s.animate?.([{ boxShadow: "0 0 0 2px var(--neon)" }, { boxShadow: "0 0 0 0 transparent" }], 1200); }
     }
-    else if (k === "reports") openReport();
+    else if (k === "reports") openExec();
     else if (k === "night") runAction("night_mode");
     else if (k === "health") runAction("project_health");
   }));

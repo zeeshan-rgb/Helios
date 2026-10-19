@@ -418,3 +418,23 @@ button.sm:disabled { opacity: .4; cursor: default; }
   .rb-bob, .rb-eyes, .rb-ring, .rb-aura, .rb-tip, .rb-mouth, .skel, .iconbtn.spin svg { animation: none !important; }
   #rpanel, #side { transition: none !important; }
 }
+
+/* ---- Reports / Executive Overview (docs/HELIOS_EXECUTIVE_REPORTING.md) ---- */
+.exfilters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.exfilters select, .exfilters input { background: var(--panel); color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+.exstats { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; margin: 6px 0 4px; }
+.exstat { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px; padding: 7px 9px; }
+.exstat b { display: block; font-size: 17px; font-weight: 600; }
+.exstat span { font-size: 11px; color: var(--muted); }
+.exev { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; padding: 6px 0; border-bottom: 1px dashed var(--line-soft); }
+.exev .sev { flex: none; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); }
+.exev .sev.CRITICAL { color: var(--red); border-color: rgba(255, 107, 129, .5); }
+.exev .sev.HIGH { color: var(--amber); border-color: rgba(245, 196, 81, .45); }
+.exev .sev.NORMAL { color: var(--accent); }
+.exev .sev.LOW { color: var(--faint); }
+.exev .what { flex: 1; min-width: 0; }
+.exev .meta { color: var(--muted); font-size: 11px; }
+.exev.acked { opacity: .55; }
+.exev button { flex: none; font-size: 11px; padding: 2px 8px; }
+.exrep { cursor: pointer; }
+.exrep:hover { color: var(--neon); }

@@ -510,6 +510,11 @@ def _announce(rec: dict, emit) -> None:
             notify.toast("Helios Night Mode", msg)
     except Exception:
         pass
+    try:                                          # executive reporting: event + Night Mode report
+        from .. import executive
+        executive.on_night_finished(rec, publish=emit)
+    except Exception as e:  # pragma: no cover
+        conf.log("night", f"executive report failed: {e}")
 
 
 # ------------------------------------------------------------------------------ app hook

@@ -507,6 +507,16 @@ def run_all(name: str | None = None, *, deps: bool = True, probes: bool = True) 
                     st["probes"][b] = _probe("fail", [f"probe crashed: {e}"], [f"{PROBES[b][0]} probe crashed: {e}"])
         projects._save_state(p, st)
         out.append(project_report(p))
+    for r in out:                     # a failing project is reported to the owner (once per problem)
+        if r["verdict"] == "FAILING":
+            try:
+                from . import executive
+                executive.emit("projects", "project_failing", "HIGH", f"Project {r['project']} is failing: "
+                               + "; ".join(r["issues"][:2]), related=f"project:{r['project']}",
+                               action=f"`helios projects health {r['project']}`",
+                               dedupe_key=f"project_failing:{r['project']}")
+            except Exception:
+                pass
     return out
 
 

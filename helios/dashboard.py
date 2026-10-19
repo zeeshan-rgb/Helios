@@ -113,6 +113,14 @@ def _probe_agy() -> None:
             detail = f"couldn't run agy: {e}"[:160]
     with _probe_lock:
         _probe.update(at=_now(), ok=ok, detail=detail, models=models, running=False)
+    if not ok:
+        try:
+            from . import executive
+            executive.emit("antigravity", "engine_unavailable", "HIGH", f"Antigravity unavailable: {detail}",
+                           action="run `agy` once in a terminal (sign-in) or check [antigravity].bin",
+                           dedupe_key="agy:unavailable")
+        except Exception:
+            pass
 
 
 def engine_health(force: bool = False) -> dict:
@@ -562,6 +570,98 @@ def summary() -> dict:
             "engine": {"label": ENGINE_LABEL.get(conf.brain_engine(), conf.brain_engine()),
                        **{k: v for k, v in engine_health().items() if k != "models"}},
             "featured": featured(), "updated": _now()}
+
+
+# ------------------------------------------------------------------ executive overview / reports
+
+_EXEC_CATS = ("all", "business", "research", "projects", "night", "jobs", "system", "approvals", "failures", "calls")
+_CAT_SOURCES = {"business": {"prospecting"}, "research": {"research", "leads"}, "projects": {"projects"},
+                "night": {"night_mode"}, "jobs": {"jobs"}, "system": {"system", "antigravity", "calling"}}
+
+
+def exec_range(rng: str, frm: str = "", to: str = "") -> tuple[datetime, datetime]:
+    now = datetime.now()
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if rng == "yesterday":
+        return day0 - timedelta(days=1), day0
+    if rng == "7d":
+        return now - timedelta(days=7), now
+    if rng == "custom":
+        try:
+            a = datetime.fromisoformat(frm)
+            b = datetime.fromisoformat(to) + (timedelta(days=1) if len(to) == 10 else timedelta(0))
+            return a, b
+        except ValueError:
+            pass
+    return day0, now
+
+
+def executive_view(rng: str = "today", frm: str = "", to: str = "", cat: str = "all") -> dict:
+    """The Reports / Executive Overview pane: pipeline, decisions, events, reports, calls."""
+    from . import calling, executive
+    a, b = exec_range(rng, frm, to)
+    s, u = a.isoformat(timespec="seconds"), b.isoformat(timespec="seconds")
+    cat = cat if cat in _EXEC_CATS else "all"
+    evs = _safe(lambda: executive.events(since=s, until=u, limit=300), [])
+    snz = _safe(executive.snoozed_until, None)
+    if cat == "approvals":
+        evs = [e for e in evs if e["approval"]]
+    elif cat == "failures":
+        evs = [e for e in evs if e["severity"] in ("CRITICAL", "HIGH") and "lead" not in e["type"]]
+    elif cat in _CAT_SOURCES:
+        evs = [e for e in evs if e["source"] in _CAT_SOURCES[cat]]
+    elif cat == "calls":
+        evs = [e for e in evs if e["source"] == "calling"]
+    return {"range": {"from": s, "to": u, "name": rng}, "category": cat,
+            "pipeline": _safe(lambda: executive.business(a, b), {}),
+            "decisions": _safe(executive.decisions, []),
+            "events": evs[:150],
+            "unacked": _safe(lambda: len(executive.events(unacked=True, limit=500)), 0),
+            "snoozed_until": snz.isoformat(timespec="minutes") if snz else "",
+            "reports": _safe(lambda: [r for r in executive.reports(limit=200) if s <= r["created"] <= u][:30], []),
+            "calls": _safe(lambda: [{k: c[k] for k in ("id", "due", "status", "reason", "to_masked", "answered",
+                                                         "duration", "detail")} for c in calling.calls(30)], []),
+            "calling": _safe(calling.status, {}),
+            "schedule": _safe(lambda: {k: executive.cfg().get(k) for k in
+                                       ("midday_time", "eod_time", "weekly_day", "weekly_time", "quiet_hours_start",
+                                        "quiet_hours_end", "channels")}, {})}
+
+
+def exec_report_text(rid: int) -> str | None:
+    from . import executive
+    r = next((x for x in executive.reports(limit=500) if x["id"] == rid), None)
+    if not r:
+        return None
+    try:
+        return Path(r["path"]).read_text(encoding="utf-8") if r["path"] else r["spoken"]
+    except OSError:
+        return r["spoken"] or "(the report file is no longer there)"
+
+
+def exec_action(body: dict, publish=None) -> dict:
+    """The user's own clicks in the Reports pane. None of these contact anyone."""
+    from . import calling, executive
+    act = str(body.get("action") or "")
+    if act == "ack":
+        ids = [str(i) for i in (body.get("ids") or [])][:200]
+        return {"ok": True, "count": executive.acknowledge(ids)}
+    if act == "ack_all":
+        return {"ok": True, "count": executive.acknowledge(None)}
+    if act == "snooze":
+        h = float(body.get("hours") or 0)
+        until = executive.snooze(h)
+        return {"ok": True, "until": until.isoformat(timespec="minutes") if h > 0 else ""}
+    if act == "cancel_call":
+        cid = body.get("id")
+        return {"ok": True, "count": calling.cancel(int(cid) if cid else None)}
+    if act == "build":
+        kind = str(body.get("kind") or "")
+        if kind not in ("midday", "eod", "night", "weekly"):
+            return {"ok": False, "message": "unknown report"}
+        res = executive.deliver_report(kind, publish=publish) if body.get("deliver") else \
+            {"status": "built", "report": executive.build(kind)}
+        return {"ok": True, "status": res["status"], "text": res["report"]["text"]}
+    return {"ok": False, "message": "unknown action"}
 
 
 # ------------------------------------------------------------------ actions (background, user-clicked)

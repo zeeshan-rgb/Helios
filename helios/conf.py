@@ -91,16 +91,22 @@ def load() -> dict:
 SETTINGS = load()
 
 
-def set_secret(section: str, key: str, value: str | None) -> None:
+def set_secret(section: str, key: str, value: str | list | None) -> None:
     """Set (or with None, remove) `key` in config/secrets.toml [section], keeping every other
     line as it was. Only the CLI calls this (token prompts / sign-in) — never the AI, which can't
-    touch secrets.toml at all (protected path). The value is written as a TOML string."""
+    touch secrets.toml at all (protected path). The value is written as a TOML string (a list →
+    an array of strings, e.g. [telegram] allowed_ids)."""
     import json as _json
     if not re.fullmatch(r"[A-Za-z0-9_]+", section) or not re.fullmatch(r"[A-Za-z0-9_]+", key):
         raise ValueError("bad secrets section/key name")
     path = CONFIG_DIR / "secrets.toml"
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    new = None if value is None else f"{key} = {_json.dumps(str(value))}"
+    if value is None:
+        new = None
+    elif isinstance(value, (list, tuple)):
+        new = f"{key} = {_json.dumps([str(v) for v in value])}"
+    else:
+        new = f"{key} = {_json.dumps(str(value))}"
     start = next((i for i, ln in enumerate(lines) if ln.strip() == f"[{section}]"), None)
     if start is None:
         if new is None:

@@ -353,6 +353,16 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError) as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode())
             return self._send(200, json.dumps({"ok": True, "item": pros.card(p)}, default=str).encode())
+        if path == "/exec/action":
+            # The user's clicks in the Reports pane (token + origin checked above): mark reviewed,
+            # snooze, cancel a scheduled call, build a report. Nothing here contacts anyone.
+            from . import dashboard
+            hub = self.app["hub"]
+            try:
+                res = dashboard.exec_action(self._json_body(), publish=hub.publish)
+            except (TypeError, ValueError) as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode())
+            return self._send(200 if res["ok"] else 400, json.dumps(res, default=str).encode())
         if path == "/dashboard/run":
             # Quick actions the user clicked (token + origin checked above): Night Mode / project
             # checks start in the background; the result arrives as a 'dashboard' SSE event.
@@ -646,6 +656,16 @@ class Handler(BaseHTTPRequestHandler):
             data = {"items": dashboard.projects_view()}
         elif name == "report":
             data = {"text": dashboard.night_report()}
+        elif name == "exec":
+            data = dashboard.executive_view(one("range") or "today", one("from"), one("to"), one("cat") or "all")
+        elif name == "exec_report":
+            try:
+                txt = dashboard.exec_report_text(int(one("id")))
+            except ValueError:
+                return self._send(400, b'{"error":"bad id"}')
+            if txt is None:
+                return self._send(404, b'{"error":"no such report"}')
+            data = {"text": txt}
         elif name == "module":
             data = dashboard.module_detail(one("id"))
             if data is None:

@@ -20,8 +20,11 @@ from datetime import datetime
 from .. import db
 
 STATUSES = ("NEW", "RESEARCHED", "QUALIFIED", "DRAFTED", "APPROVED", "CONTACTED", "REPLIED",
-            "INTERESTED", "NOT_INTERESTED", "CLOSED", "REJECTED", "ARCHIVED")
-_AFTER_CONTACT = ("REPLIED", "INTERESTED", "NOT_INTERESTED", "CLOSED")
+            "INTERESTED", "NOT_INTERESTED", "PROPOSAL_ACCEPTED", "WON", "LOST", "CLOSED", "REJECTED", "ARCHIVED")
+_AFTER_CONTACT = ("REPLIED", "INTERESTED", "NOT_INTERESTED", "PROPOSAL_ACCEPTED", "WON", "LOST", "CLOSED")
+# Outcomes that would otherwise look like revenue: they need written evidence (a signed quote, an
+# invoice / payment reference …) — never set from a guess.
+NEEDS_EVIDENCE = ("PROPOSAL_ACCEPTED", "WON")
 _JSON_COLS = ("socials", "audit", "reasons", "quote", "draft", "contact_log", "sources")
 
 _SCHEMA = """
@@ -254,10 +257,12 @@ def counts(since: str | None = None) -> dict:
 _RESEARCH_FLOW = ("NEW", "RESEARCHED", "QUALIFIED", "DRAFTED")
 
 
-def set_status(pid: int, status: str) -> dict:
+def set_status(pid: int, status: str, *, evidence: str = "", by: str = "user") -> dict:
     """Research-flow and after-contact statuses only. APPROVED → approve(); CONTACTED →
-    record_contact()."""
+    record_contact(). PROPOSAL_ACCEPTED / WON need evidence (it's recorded in the history)."""
     status = status.upper()
+    if status in NEEDS_EVIDENCE and not (evidence or "").strip():
+        raise StatusError(f"{status} needs evidence (e.g. the signed quote or payment reference)")
     if status not in STATUSES:
         raise StatusError(f"unknown status {status}")
     if status in ("APPROVED", "CONTACTED"):
@@ -273,6 +278,9 @@ def set_status(pid: int, status: str) -> dict:
     if status in _RESEARCH_FLOW and cur in ("APPROVED", "CONTACTED", *_AFTER_CONTACT):
         raise StatusError(f"can't move back to {status} from {cur}")
     _write(pid, {"status": status})
+    if status in _AFTER_CONTACT:          # outcomes are part of the history, with their evidence
+        log_event(pid, status.lower().replace("_", " ") + (f" — evidence: {evidence.strip()[:200]}" if evidence else ""),
+                  by=by)
     return get(pid)
 
 

@@ -64,9 +64,12 @@ _HELIOS_ASK = {
     "gmail_add_business_contact",   # widens who Helios drafts replies for
     "browser_download",     # saves a file from the web (hidden browser sandbox)
     "prospect_approve",     # approves outreach to a business — the user's explicit yes
+    "schedule_call", "call_me_now",   # rings the owner's own phone (authorized numbers only)
 }
 # Helios's own tools that contact a real person (blocked outright for background agents).
-_HELIOS_OUTBOUND = {"gmail_send_draft"}
+# Phone calls go only to the owner's own authorized number, but they still ring a real phone: only an
+# explicit request from the owner (Approve/Deny, never YOLO) — never a background agent or a web page.
+_HELIOS_OUTBOUND = {"gmail_send_draft", "schedule_call", "call_me_now"}
 # Hidden-browser actions that, with confirm=true, submit / send / buy / sign up on a website —
 # the browser refuses them without confirm, and confirm=true routes to the user's prompt.
 _HELIOS_CONFIRMED = {"browser_click", "browser_type"}

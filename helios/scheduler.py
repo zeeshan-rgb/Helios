@@ -156,6 +156,14 @@ class Scheduler:
         except Exception as e:  # pragma: no cover
             conf.log("scheduler", f"jobs tick error: {e}")
 
+        # 3g) Executive reporting: route queued events (severity / quiet hours / snooze), deliver the
+        # midday / end-of-day / weekly reports when due, and place / follow personal phone calls.
+        try:
+            from . import executive
+            executive.tick(now, publish=self.emit)
+        except Exception as e:  # pragma: no cover
+            conf.log("scheduler", f"executive tick error: {e}")
+
         # 4) proactive observers (~every 5 min)
         if datetime.now() >= self._next_observe:
             self._next_observe = datetime.now() + timedelta(minutes=5)

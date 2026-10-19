@@ -141,6 +141,8 @@ def research(pid: int, *, auditor=None, fetch=None, robots=None, link_check: boo
             store.set_status(pid, "DRAFTED")
     if newly:
         store.add_qualified(p["area"], 1)
+        from .. import executive           # report it (HIGH for priority A with a public contact)
+        executive.lead_event(store.get(pid))
     return store.get(pid)
 
 

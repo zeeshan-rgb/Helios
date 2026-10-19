@@ -61,6 +61,23 @@ def _no_real_web(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_outbound(tmp_path_factory, monkeypatch):
+    """Executive reporting reaches the owner on Telegram and by phone (Twilio). No test may send a
+    real Telegram message or place a real call, and reports never land in the real vault. Tests of
+    those paths pass their own opener / placer / poller or patch these again."""
+    from helios import calling, channels, executive, voice_note
+    d = tmp_path_factory.mktemp("exec")
+    monkeypatch.setattr(channels, "telegram_send", lambda *a, **k: (False, "Telegram isn't configured (tests)"))
+    monkeypatch.setattr(channels, "telegram_send_voice", lambda *a, **k: (False, "Telegram isn't configured (tests)"))
+    monkeypatch.setattr(channels, "telegram_find_chat", lambda *a, **k: (_ for _ in ()).throw(ValueError("no network in tests")))
+    monkeypatch.setattr(voice_note, "_speaker", lambda: (_ for _ in ()).throw(RuntimeError("no real TTS in tests")))
+    monkeypatch.setattr(calling, "place", lambda *a, **k: {"ok": False, "sid": "", "status": "failed",
+                                                           "detail": "network disabled in tests"})
+    monkeypatch.setattr(calling, "fetch_status", lambda *a, **k: {"status": "", "error": "network disabled in tests"})
+    monkeypatch.setattr(executive, "folder", lambda: d / "Executive Reports")
+
+
+@pytest.fixture(autouse=True)
 def _no_real_battery(monkeypatch):
     """Night Mode skips heavy tasks on a low battery; tests must not depend on whether this laptop
     happens to be unplugged. Tests of the power rule pass their own reader."""

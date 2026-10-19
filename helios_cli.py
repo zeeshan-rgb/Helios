@@ -945,6 +945,191 @@ def cmd_briefing(args) -> int:
     return 0
 
 
+def cmd_reports(args) -> int:
+    """Executive reports: `helios reports [list | morning | midday | eod | night | weekly [--deliver] |
+    snooze <hours>]`. A kind prints that report now (--deliver also saves + sends it on your channels);
+    `snooze 0` cancels a snooze. Every number comes from Helios's records."""
+    _conf()
+    from helios import briefing, executive
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "list"
+    if action == "list":
+        rows = executive.reports(limit=20)
+        for r in rows:
+            print(f"{r['created'][:16]}  {r['kind']:<8} {r['summary'][:90]}")
+        print("" if rows else "No reports yet.")
+    elif action == "morning":
+        print(briefing.latest_text(spoken_version="--spoken" in args))
+    elif action in executive.KINDS:
+        if "--deliver" in args:
+            res = executive.deliver_report(action)
+            print(res["report"]["text"])
+            print(f"\n({res['status']}" + (f": {res['saved']['path']}" if res.get("saved") else "") + ")")
+        else:
+            rep = executive.build(action)
+            print(rep["spoken"] if "--spoken" in args else rep["text"])
+    elif action == "snooze" and args:
+        h = float(args[0])
+        until = executive.snooze(h)
+        print("Snooze cancelled." if h <= 0 else f"Non-critical notifications held until {until:%H:%M}.")
+    else:
+        print(cmd_reports.__doc__.split(":", 1)[1].strip())
+        return 2
+    return 0
+
+
+def cmd_events(args) -> int:
+    """Notification events: `helios events [all | ack <id...> | ack all]` (default: unreviewed)."""
+    _conf()
+    from helios import executive
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "unacked"
+    if action == "ack":
+        n = executive.acknowledge(None if args == ["all"] else args)
+        print(f"Marked {n} event(s) reviewed.")
+        return 0
+    evs = executive.events(unacked=action != "all", limit=50)
+    for e in evs:
+        print(f"{e['id']}  [{e['severity']:<8}] {e['source']}: {e['summary'][:100]}"
+              + (f" (x{e['count']})" if e["count"] > 1 else "") + f"  {e['state']}"
+              + ("  reviewed" if e["acknowledged"] else ""))
+    print("" if evs else "Nothing unreviewed.")
+    return 0
+
+
+def cmd_calling(args) -> int:
+    """Personal phone briefings (your own number only, one-way): `helios calling [status | setup |
+    number <+E164...> | on | off | test | log | cancel [id]]`. setup asks for the Twilio account SID,
+    auth token and Twilio number at a hidden prompt (saved to secrets.toml); test makes ONE real call
+    to your number after you confirm."""
+    _conf()
+    from helios import calling, conf
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "status"
+    try:
+        if action == "status":
+            st = calling.status()
+            print(f"Phone briefings: {'READY' if st['ready'] else 'not ready'} (enabled={st['enabled']}, "
+                  f"provider={'ok' if st['provider'] else 'missing'}, numbers={', '.join(st['numbers']) or 'none'})")
+            for r in st["reasons"]:
+                print(f"  - {r}")
+            for c in calling.calls(10, upcoming=True):
+                print(f"  upcoming #{c['id']} {c['due'][:16]} - {c['reason']}")
+            print(f"  {st['two_way_note']}")
+        elif action == "provider" and args and args[0].lower() in ("telegram", "twilio"):
+            calling.set_option("provider", args[0].lower())
+            print(f"Briefings now go by {'Telegram voice message' if args[0].lower() == 'telegram' else 'Twilio phone call'}."
+                  " Run `helios calling test` before `helios calling on`.")
+        elif action == "setup" and calling.provider() == "telegram":
+            return cmd_telegram(["setup"])
+        elif action == "setup":
+            import getpass
+            print("Copy each value from the Twilio console (Account info box) and paste it at its prompt.")
+            print("Nothing you type or paste will show - press Enter after each one.")
+            sid = getpass.getpass("Account SID (starts with AC): ").strip()
+            tok = getpass.getpass("Auth token (click 'Show' in the console first): ").strip()
+            frm = getpass.getpass("Your Twilio phone number, e.g. +15551234567: ").strip().replace(" ", "").replace("-", "")
+            bad = calling.validate_twilio(sid, tok, frm)
+            if bad:
+                print("Nothing saved - " + "; ".join(bad) + ".")
+                print("Tip: copy one value at a time from the Twilio console; don't paste commands here.")
+                return 1
+            for k, v in (("account_sid", sid), ("auth_token", tok), ("from_number", frm)):
+                conf.set_secret("twilio", k, v)
+            print(f"Saved to config/secrets.toml [twilio]: SID {sid[:4]}...{sid[-4:]}, token ****{tok[-2:]}, "
+                  f"number {calling.mask(frm)}.")
+            print("Next: helios calling number +<your number>, then helios calling test.")
+        elif action == "number" and args:
+            nums = [n.replace(" ", "").replace("-", "") for n in " ".join(args).split(",") if n.strip()]
+            calling.set_option("authorized_numbers", nums)
+            print(f"Authorized: {', '.join(calling.mask(a) for a in nums)} (Helios will call no other number).")
+        elif action in ("on", "off"):
+            if action == "on" and not (calling.provider_ready()[0] and calling.verified()):
+                print("Can't turn on yet: " + "; ".join(r for r in calling.status()["reasons"] if "is off" not in r))
+                return 1
+            calling.set_option("enabled", action == "on")
+            n = calling.cancel() if action == "off" else 0
+            print(f"Phone briefings {action}." + (f" {n} upcoming call(s) cancelled." if n else ""))
+        elif action == "test":
+            nums = calling.targets()
+            if not nums:
+                print("Telegram isn't set up yet: helios telegram setup" if calling.provider() == "telegram"
+                      else "No authorized number yet: helios calling number +<your number>")
+                return 1
+            what = "send ONE test voice message to your Telegram" if calling.provider() == "telegram" else \
+                f"place ONE real test call to {calling.mask(nums[0])}"
+            if input(f"{what[0].upper() + what[1:]} now? Type yes: ").strip().lower() != "yes":
+                print("Cancelled.")
+                return 0
+            if calling.provider() == "telegram":
+                print("Recording it in Helios's voice (takes a few seconds)...")
+            res = calling.test_call()
+            print(f"Test: {res['status']}" + (f" (answered, {res.get('duration', 0)}s)" if res.get("answered") else "")
+                  + (f" - {res['detail']}" if res.get("detail") else ""))
+            if res["status"] == "completed":
+                print("Verified. Turn briefings on with: helios calling on")
+            return 0 if res["status"] == "completed" else 1
+        elif action == "log":
+            for c in calling.calls(20):
+                print(f"#{c['id']} {c['due'][:16]} {c['status']:<10} {c['reason'][:60]}"
+                      + (f" ({c['detail'][:80]})" if c["detail"] else ""))
+        elif action == "cancel":
+            print(f"Cancelled {calling.cancel(int(args[0]) if args else None)} call(s).")
+        else:
+            print(cmd_calling.__doc__.split(":", 1)[1].strip())
+            return 2
+    except ValueError as e:
+        print(e)
+        return 1
+    return 0
+
+
+def cmd_telegram(args) -> int:
+    """Telegram (your own bot, only you): `helios telegram [status | setup | test]`. setup takes the
+    bot token at a hidden prompt and finds your chat when you press Start in the bot; it enables
+    voice briefings and texting Helios from your phone (only your Telegram account is accepted)."""
+    _conf()
+    import getpass
+    from helios import calling, channels, conf
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "status"
+    if action == "status":
+        token, chat = channels.telegram_target()
+        print(f"Telegram: {'set up' if token and chat else 'not set up (helios telegram setup)'}")
+        print(f"Briefings go by: {calling.provider()}")
+    elif action == "setup":
+        print("1. In Telegram, open @BotFather and send /newbot. Name it e.g. 'Helios'; the username must end in 'bot'.")
+        print("   Use a NEW bot just for Helios (not the one Claude Code Remote uses).")
+        print("2. BotFather replies with a token like 123456789:AA... - copy it and paste it below (it won't show).")
+        token = getpass.getpass("Bot token: ").strip()
+        if not re.fullmatch(r"\d{6,12}:[A-Za-z0-9_-]{30,}", token):
+            print("Nothing saved - that doesn't look like a bot token (digits, a colon, then ~35 letters/digits).")
+            return 1
+        input("3. Now open your new bot in Telegram (the t.me link BotFather gave you), press START, then press Enter here...")
+        try:
+            chat, name = channels.telegram_find_chat(token)
+        except ValueError as e:
+            print(f"Nothing saved - {e}")
+            return 1
+        if input(f"Found your chat: {name or 'unnamed'} (id ending {chat[-3:]}). Is that you? Type yes: ").strip().lower() != "yes":
+            print("Nothing saved.")
+            return 1
+        conf.set_secret("telegram", "token", token)
+        conf.set_secret("telegram", "allowed_ids", [chat])
+        conf.set_secret("telegram", "chat_id", chat)
+        calling.set_option("provider", "telegram")
+        print("Saved to config/secrets.toml [telegram]. Only your Telegram account can use this bot.")
+        print("Next: helios calling test   (sends one voice message)   then: helios calling on   and restart Helios.")
+    elif action == "test":
+        ok, detail = channels.telegram_send("Helios: Telegram is connected, sir.")
+        print("Sent - check Telegram." if ok else detail)
+        return 0 if ok else 1
+    else:
+        print(cmd_telegram.__doc__.split(":", 1)[1].strip())
+        return 2
+    return 0
+
+
 def cmd_research(args) -> int:
     """Research: `helios research [topics | run [topic ...] | findings [topic] [--days N] |
     show <id> | keep <id>]`. `keep` copies one finding into memory (findings never go there
@@ -1005,6 +1190,10 @@ _COMMANDS = {
     "polarion": cmd_polarion,
     "gmail": cmd_gmail,
     "prospects": cmd_prospects,
+    "reports": cmd_reports,
+    "events": cmd_events,
+    "calling": cmd_calling,
+    "telegram": cmd_telegram,
 }
 
 _USAGE = ("Helios â€” usage: helios <command>\n"
@@ -1031,6 +1220,10 @@ _USAGE = ("Helios â€” usage: helios <command>\n"
           "  polarion      read-only Polarion (local + server): status / token / projects / search / item\n"
           "  gmail         Gmail: setup / login / business contacts / inbox / reply drafts / send\n"
           "  prospects     local businesses needing a website/AI: run / list / show / approve / sent / coverage\n"
+          "  reports       executive reports: midday / eod / night / weekly now, history, snooze\n"
+          "  events        notification events (urgent / high / digest); ack when reviewed\n"
+          "  calling       spoken briefings to YOU (Telegram voice or Twilio call): test / on / off / log / cancel\n"
+          "  telegram      your own Helios bot: setup / test / status\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

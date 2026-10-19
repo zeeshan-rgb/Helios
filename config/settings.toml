@@ -48,7 +48,7 @@ effort = ""             # low | medium | high | max ; blank = agy default
 # Background agents (routines, missions, side tasks) pick a model per router tier:
 light = "gemini-3.8-flash-low"
 medium = "gemini-3.8-flash-medium"
-heavy = "gemini-3.1-pro-high"
+heavy = "claude-opus-4-6-thinking"   # was gemini-3.1-pro-high (not offered by the account); verified 2026-10-19
 digest_chars = 4000     # cap on the per-turn memory digest (it stays in the conversation = quota)
 # Post-turn memory extraction costs one extra agy run per reply (~24k input tokens of agy's own
 # system prompt). Off until the Phase 4 memory work adds a cheaper path.
@@ -431,3 +431,51 @@ signature = ""                   # email sign-off, e.g. "Best regards,\nZeeshan\
 # addons_whatsapp_ai = [10000, 25000]        # H  add-ons for an existing site
 # online_booking = [8000, 15000]             # optional add-on
 # whatsapp_integration = [5000, 10000]       # optional add-on
+
+[executive_reporting]
+# Helios reports to you like a reliable employee (docs/HELIOS_EXECUTIVE_REPORTING.md). Subsystems
+# raise events (CRITICAL / HIGH / NORMAL / LOW); CRITICAL + HIGH reach you promptly, NORMAL / LOW wait
+# for the next report. The morning report is the [briefing] above (now with a business section).
+# Reports are saved to <vault>\Executive Reports\ and shown on the dashboard (Reports). Commands:
+# helios reports [midday|eod|night|weekly] [--deliver], helios events, helios reports snooze <hours>.
+enabled = true
+midday_report = true
+midday_time = "13:00"
+skip_quiet_midday = true          # no midday report when nothing meaningful changed
+end_of_day_report = true
+eod_time = "18:30"
+night_mode_report = true          # when a scheduled Night Mode run finishes
+weekly_review = true
+weekly_day = "mon"
+weekly_time = "09:00"
+quiet_hours_start = "22:00"       # HIGH events wait until quiet hours end (CRITICAL never waits)
+quiet_hours_end = "08:00"
+channels = ["dashboard", "toast", "telegram"]   # telegram works once `helios telegram setup` is done
+immediate = ["CRITICAL", "HIGH"]
+lead_alert_priority = "A"         # priority-A leads with a public contact -> prompt alert; others -> digest
+
+[executive_reporting.calling]
+# Spoken briefings to YOU only — never a lead, client or anyone else. Two providers:
+#   provider = "telegram": a voice message in Helios's own voice to your own Telegram bot chat (free).
+#     Setup: `helios telegram setup`, then `helios calling test`, then `helios calling on`.
+#   provider = "twilio": a real one-way phone call (paid Twilio account + a Twilio number).
+#     Setup: `helios calling setup`, `helios calling number +91...`, `helios calling test`, `helios calling on`.
+# Your phone number is stored in config/secrets.toml [calling] (private), never in this file.
+# Nothing is sent until a test to the exact current details has completed.
+enabled = true
+provider = "telegram"               # "telegram" or "twilio" (`helios calling provider ...`)
+authorized_numbers = []           # E.164, e.g. ["+91XXXXXXXXXX"] — your own phone only
+call_for_morning_briefing = true
+call_for_end_of_day = false
+call_when_night_mode_finishes = false
+call_for_weekly_review = false
+call_for_critical_events = true
+call_for_high_priority_leads = false
+maximum_calls_per_day = 3
+min_minutes_between_calls = 60
+quiet_hours_start = "22:00"
+quiet_hours_end = "08:00"
+critical_in_quiet_hours = false
+max_attempts = 2                  # critical calls only are retried
+retry_minutes = 10
+voice = "Polly.Brian"

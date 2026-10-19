@@ -848,12 +848,14 @@ def prospect_approve(prospect_id: int) -> str:
 
 
 @mcp.tool()
-def prospect_set_status(prospect_id: int, status: str) -> str:
+def prospect_set_status(prospect_id: int, status: str, evidence: str = "") -> str:
     """Record what happened: REJECTED / ARCHIVED (drop it), or after contact REPLIED / INTERESTED /
-    NOT_INTERESTED / CLOSED. (APPROVED and CONTACTED can't be set here.)"""
+    NOT_INTERESTED / PROPOSAL_ACCEPTED / WON / LOST / CLOSED. PROPOSAL_ACCEPTED and WON need
+    `evidence` the user gave you (signed quote, invoice / payment reference) — never guess one.
+    (APPROVED and CONTACTED can't be set here.)"""
     from helios.prospecting import engine, store
     try:
-        return engine.format_prospect(store.set_status(prospect_id, status))
+        return engine.format_prospect(store.set_status(prospect_id, status, evidence=evidence, by=_memory_source()))
     except store.StatusError as e:
         return str(e)
 
@@ -863,6 +865,153 @@ def prospects_coverage(area: str = "") -> str:
     """Which areas/cells have been searched, how many businesses and qualified prospects each gave."""
     from helios.prospecting import engine, store
     return engine.format_coverage(store.coverage(area or None))
+
+
+# ---------------------------------------------------------------- executive reporting + calls
+
+@mcp.tool()
+def exec_report(kind: str = "eod") -> str:
+    """Give the user a report now ("give me my end-of-day report", "what did you do today", "weekly
+    review", "morning briefing"). kind = morning | midday | eod | night | weekly. Every number comes
+    from Helios's records; completed / failed / skipped / waiting-for-decision are kept apart."""
+    from helios import briefing, executive
+    kind = (kind or "eod").lower().strip()
+    if kind == "morning":
+        return briefing.latest_text() or briefing.render(briefing.build())
+    try:
+        return executive.build(kind)["text"]
+    except ValueError as e:
+        return str(e)
+
+
+@mcp.tool()
+def pending_decisions() -> str:
+    """What's waiting for the user's decision ("what needs my approval", "what's pending"): drafts
+    to approve, quotes needing a price, lessons to review, approval events."""
+    from helios import executive
+    d = executive.decisions()
+    return "\n".join(f"- {x['what']}" + (f" — {x['how']}" if x.get("how") else "") for x in d) or "Nothing is waiting for you."
+
+
+@mcp.tool()
+def lead_digest(days: int = 1) -> str:
+    """The business pipeline for the last `days` days ("which leads should I contact today", "how is
+    prospecting going"): discovered, researched, qualified, drafts, and the best opportunities with
+    why, evidence, package and price. Leads and proposals are not revenue; nothing has been sent."""
+    from datetime import timedelta
+    from helios import executive
+    b = executive.business(datetime.now() - timedelta(days=max(1, min(int(days), 60))))
+    out = [f"Last {days} day(s): discovered {b['discovered']}, researched {b['researched']}, qualified {b['qualified']}, "
+           f"no website (verified) {b['no_website_verified']}, redesign {b['redesign']}, strong AI {b['strong_ai']}; "
+           f"drafts awaiting approval {b['drafted']}, quotes needing pricing {b['needs_pricing']}; "
+           f"contacted (verified) {b['contacted_in_period']}, replies {b['replies']}, won {b['won']}."]
+    out += [f"- #{t['id']} {t['name']} ({t['category']}, {t['area']}) priority {t['priority'] or '?'} — {t['why'] or '—'}; "
+            f"{t['package'] or 'no package'}; {t['price'] or '—'}; evidence: {t['evidence'] or '—'}" for t in b["top"]]
+    return "\n".join(out)
+
+
+@mcp.tool()
+def exec_events(unacked: bool = True, severity: str = "", source: str = "") -> str:
+    """Helios's notification events ("anything urgent?", "what happened while I was away"):
+    severity, source, summary, how many times seen, delivery and whether reviewed."""
+    from helios import executive
+    evs = executive.events(unacked=unacked, severity=severity or None, source=source or None, limit=40)
+    if not evs:
+        return "No events." if not unacked else "Nothing unreviewed."
+    return "\n".join(f"{e['id']} [{e['severity']}] {e['source']}: {e['summary']}" + (f" (x{e['count']})" if e["count"] > 1 else "")
+                     + f" · {e['state']}" + (" · reviewed" if e["acknowledged"] else "") for e in evs)
+
+
+@mcp.tool()
+def ack_events(ids: str = "", all_events: bool = False) -> str:
+    """Mark events reviewed when the user says so ("mark those as read", "I've seen it"). ids =
+    comma-separated event ids; all_events=true marks every unreviewed event."""
+    from helios import executive
+    lst = [i.strip() for i in ids.split(",") if i.strip()]
+    if not lst and not all_events:
+        return "Give event ids, or all_events=true."
+    return f"Marked {executive.acknowledge(None if all_events else lst)} event(s) reviewed."
+
+
+@mcp.tool()
+def snooze_reports(hours: float = 2) -> str:
+    """Hold non-critical notifications ("don't disturb me for two hours", hours=0 cancels). Critical
+    events still come through; held ones are delivered when the snooze ends."""
+    from helios import executive
+    if hours <= 0:
+        executive.snooze(0)
+        return "Snooze cancelled."
+    return f"Non-critical notifications held until {executive.snooze(hours):%H:%M}."
+
+
+@mcp.tool()
+def calling_status() -> str:
+    """Whether personal phone briefings are set up and on, which (masked) number, upcoming calls,
+    and why not if they're off. One-way only (no live conversation on the call)."""
+    from helios import calling
+    st = calling.status()
+    up = calling.calls(10, upcoming=True)
+    lines = [f"Phone briefings: {'ready' if st['ready'] else 'not ready'} · enabled={st['enabled']} · "
+             f"number(s): {', '.join(st['numbers']) or 'none'}"]
+    lines += [f"- {r}" for r in st["reasons"]]
+    lines += [f"Upcoming: #{c['id']} {c['due'][:16]} — {c['reason']}" for c in up]
+    lines.append(st["two_way_note"])
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def call_log(limit: int = 10) -> str:
+    """Recent personal phone calls with their real states (scheduled / initiated / answered /
+    completed / failed / refused) — a call is only 'completed' if the provider said so."""
+    from helios import calling
+    rows = calling.calls(max(1, min(int(limit), 50)))
+    return "\n".join(f"#{c['id']} {c['due'][:16]} {c['status']} — {c['reason']}" + (f" ({c['detail']})" if c["detail"] else "")
+                     for c in rows) or "No calls yet."
+
+
+@mcp.tool()
+def schedule_call(when: str = "", report_kind: str = "", reason: str = "") -> str:
+    """Schedule a spoken briefing to the USER ONLY — a Telegram voice message in Helios's voice or a
+    phone call to their own authorized number, whichever they set up — only when the user asks
+    ("call me at 8 with my briefing", "call me in 20 minutes with the end-of-day report"). when =
+    'HH:MM' | 'in N minutes' | 'YYYY-MM-DD HH:MM'; report_kind = morning | eod | night | weekly | midday.
+    There is no number parameter: Helios can never call anyone else. The user confirms."""
+    from helios import calling
+    try:
+        due = calling.parse_when(when)
+    except ValueError as e:
+        return str(e)
+    kind = report_kind if report_kind in ("morning", "midday", "eod", "night", "weekly") else ""
+    res = calling.schedule(reason=(reason or (f"{kind} report" if kind else "requested call"))[:120],
+                           due=due, report_kind=kind)
+    if res["status"] != "scheduled":
+        return f"Not scheduled: {res['reason']}"
+    how = "Telegram voice message" if calling.provider() == "telegram" else "one-way phone call"
+    return f"Briefing #{res['call']['id']} scheduled for {res['call']['due'].replace('T', ' ')} ({how}, one-way)."
+
+
+@mcp.tool()
+def call_me_now(report_kind: str = "eod", reason: str = "") -> str:
+    """Call the user's own authorized number right now with a report ("call me with the update") —
+    only on the user's explicit request; they confirm. The call happens within ~15 s."""
+    return schedule_call("now", report_kind, reason)
+
+
+@mcp.tool()
+def cancel_calls(call_id: int = 0) -> str:
+    """Cancel a scheduled phone call (call_id) or all upcoming ones (0) — "cancel my call"."""
+    from helios import calling
+    return f"Cancelled {calling.cancel(call_id or None)} call(s)."
+
+
+@mcp.tool()
+def calling_off() -> str:
+    """Turn personal phone calls OFF ("stop calling me"). Turning them back on is done by the user
+    (`helios calling on` or the dashboard) — not by Helios."""
+    from helios import calling
+    calling.set_option("enabled", False)
+    n = calling.cancel()
+    return f"Phone calls are off; {n} upcoming call(s) cancelled."
 
 
 @mcp.tool()
@@ -1467,29 +1616,11 @@ def notify_tim(message: str) -> str:
     """Send a short notification message to the user's own phone via his Telegram bot chat.
     Self-notification only (workflow results, reminders, 'tell me when done') - it can
     never message anyone else. For contacting other people use the messaging apps."""
-    import urllib.parse
-    text = (message or "").strip()
-    if not text:
+    from helios import channels
+    if not (message or "").strip():
         return "Nothing to send, sir."
-    tg = conf.provider_cfg("telegram")
-    token = str(tg.get("token") or "").strip()
-    ids = tg.get("allowed_ids") or []
-    chat = str(tg.get("chat_id") or (ids[0] if ids else "")).strip()
-    if not (token and chat):
-        return ("Telegram isn't configured - set [telegram] token and allowed_ids in "
-                "config/secrets.toml.")
-    try:
-        data = urllib.parse.urlencode({"chat_id": chat, "text": text[:4000]}).encode()
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage", data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"})
-        with urllib.request.urlopen(req, timeout=8) as r:
-            out = json.loads(r.read() or b"{}")
-        if out.get("ok"):
-            return "Sent to your Telegram, sir."
-        return f"Telegram rejected the message: {str(out.get('description'))[:120]}"
-    except Exception as e:
-        return f"Could not reach the Telegram bot API: {e}"
+    ok, detail = channels.telegram_send(message)
+    return "Sent to your Telegram, sir." if ok else detail
 
 
 # --------------------------------------------------------------- 3D models

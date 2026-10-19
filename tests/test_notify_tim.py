@@ -12,9 +12,16 @@ from pathlib import Path
 
 import pytest
 
-from helios import conf, permissions
+from helios import channels, conf, permissions
 
 _ROOT = Path(__file__).resolve().parent.parent
+_REAL_SEND = channels.telegram_send     # captured before conftest's no-outbound stub
+
+
+@pytest.fixture(autouse=True)
+def _real_telegram_send(monkeypatch):
+    """These tests exercise the real sender against a mocked urlopen (never the network)."""
+    monkeypatch.setattr(channels, "telegram_send", _REAL_SEND)
 
 
 @pytest.fixture(scope="module")
