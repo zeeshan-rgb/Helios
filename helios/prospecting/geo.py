@@ -18,6 +18,7 @@ import math
 import re
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -54,7 +55,8 @@ CATEGORIES: dict[str, list[tuple[str, str]]] = {
                  ("craft", "photographer"), ("shop", "printing")],
 }
 # What kind of customer journey each category has (used by scoring for concrete reasons).
-APPOINTMENT = {"salon", "clinic", "dentist", "fitness", "education", "professional", "repair"}
+APPOINTMENT = {"salon", "clinic", "dentist", "fitness", "professional", "repair"}
+ENROLMENT = {"education"}          # schools / training institutes: enquiries + admissions, not appointments
 ORDERING = {"restaurant", "bakery"}
 RETAIL = {"retail"}
 
@@ -172,6 +174,39 @@ def overpass_query(cell: str, categories: list[str], limit: int = 400) -> str:
     return f"[out:json][timeout:60];\n(\n" + "\n".join(lines) + f"\n);\nout center tags {int(limit)};"
 
 
+def overpass_endpoints() -> list[str]:
+    """Main Overpass server first, then public mirrors from the OSM wiki's list of instances.
+    Override with [prospecting] overpass_endpoints = ["https://…/api/interpreter", …]."""
+    v = (conf.SETTINGS.get("prospecting") or {}).get("overpass_endpoints") if isinstance(
+        conf.SETTINGS.get("prospecting"), dict) else None
+    return [str(u) for u in v if str(u).startswith("https://")] if isinstance(v, list) and v else \
+        [OVERPASS, "https://overpass.private.coffee/api/interpreter"]
+
+
+def _transient(e: Exception) -> bool:
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code == 429 or e.code >= 500
+    return isinstance(e, (urllib.error.URLError, TimeoutError, OSError))
+
+
+def _overpass(q: str, *, fetch=None, sleep=time.sleep) -> dict:
+    """One Overpass query, trying the next instance only on a transient failure (busy / timeout /
+    5xx) — a bad query fails at once. A short pause between tries keeps to fair use."""
+    body = urllib.parse.urlencode({"data": q}).encode()
+    last: Exception | None = None
+    for i, url in enumerate(overpass_endpoints()):
+        if i:
+            sleep(2.0)
+        try:
+            return (fetch or _get_json)(url, data=body)
+        except Exception as e:
+            if not _transient(e):
+                raise
+            last = e
+            conf.log("prospecting", f"Overpass {url} unavailable ({e}) — trying the next instance")
+    raise last if last else RuntimeError("no Overpass endpoint configured")
+
+
 def query_cell(cell: str, categories: list[str], *, fetch=None) -> list[dict]:
     """Named businesses of these categories inside one cell (cached a week)."""
     q = overpass_query(cell, categories)
@@ -184,7 +219,7 @@ def query_cell(cell: str, categories: list[str], *, fetch=None) -> list[dict]:
             return cached["elements"]
     except Exception:
         pass
-    data = (fetch or _get_json)(OVERPASS, data=urllib.parse.urlencode({"data": q}).encode())
+    data = _overpass(q, fetch=fetch)
     elements = data.get("elements") or []
     f.write_text(json.dumps({"at": time.time(), "elements": elements}), encoding="utf-8")
     return elements

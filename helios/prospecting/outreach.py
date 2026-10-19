@@ -45,6 +45,8 @@ _AI_PITCH = {
     "takes orders without an online ordering path": "customers could place orders online or through WhatsApp "
                                                     "after hours",
     "enquiries only by phone": "enquiries that come in after hours would be captured instead of missed",
+    "no online enquiry or admission form": "families could send an enquiry or book a visit online, and common "
+                                           "admission questions would be answered from your own approved information",
     "no WhatsApp option": "visitors could start a WhatsApp chat with you in one tap (they choose to)",
     "many services / FAQs": "common questions could be answered instantly from your own approved information",
 }

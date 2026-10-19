@@ -118,6 +118,47 @@ One `[min, max]` per package or add-on (`basic_website`, `modern_website`, `rede
 * **Night Mode:** `business_prospecting` at 03:10. It skips when disabled or with no areas.
 * **Morning briefing:** "New business opportunities" (counts + top 5, no contact details).
 
+## Quotation / proposal (`prospecting/proposal.py`)
+
+`helios prospects proposal <id>`, the `prospect_proposal` tool, or the dashboard's **Prepare
+proposal** button writes an **editable Markdown proposal** to `<vault>/Proposals/<business>-<id>.md`:
+
+- what was noticed, each finding with its evidence
+- the recommended package and why this business
+- scope and deliverables, and optional integrations
+- the investment (from the rate card only, otherwise **"Price to be confirmed"**)
+- timeline, assumptions, exclusions, and sources
+
+Behaviour:
+- An edited proposal is **never overwritten**: Helios writes `…-v2.md` next to it instead.
+- Nothing is sent.
+- WhatsApp is always described as visitor-started (opt-in) via the official WhatsApp Business
+  platform.
+
+**NEEDS_PRICING** is a derived view, not a status: qualified / drafted / approved prospects whose
+package has no rate-card price (`helios prospects list needs_pricing`, dashboard filter "Needs
+pricing"). The draft still goes ahead without a figure, so research isn't blocked on pricing.
+
+## Reliability rules added by the final audit (2026-10-14)
+
+| Rule | Why |
+|---|---|
+| Overpass fallback: on 429 / 5xx / timeout the next public instance is tried (`overpass-api.de` → `overpass.private.coffee`; configurable `[prospecting] overpass_endpoints`), a bad query fails at once | the main server returned 504 for a whole scan during the live test |
+| `prospects scan` is OSM-only (max_research = 0 really means 0) | a "scan" used to audit and draft up to 12 businesses |
+| Schools / training institutes are an **enquiry/admission** journey, not "works by appointment" | a school was told it "works by appointment" — an unsupported claim |
+| A slow first load is re-timed once in a fresh context; the best time counts ("best of 2 loads") | one network blip would become "your website is slow" in an email |
+| Re-research that no longer qualifies **withdraws** the draft (back to RESEARCHED, logged); a draft **you edited** is never overwritten — it's flagged `outdated` | a stale email with a false claim stayed in the approval queue |
+
+## Live verification (2026-10-14, final audit)
+
+- **Discovery:** a scan of Mehdipatnam, Hyderabad found 66 real businesses in 6 of 20 cells. The
+  fallback mirror answered when the main server returned 504; failed cells are recorded for a
+  retry. The second scan skipped the cells already done.
+- **Audits:** example.com scored website 3/5 and AI 3/5; neverssl.com scored website 1/5 (no
+  HTTPS, not mobile-friendly, very slow).
+- **Proposal:** for a real drafted business, an editable proposal was written. "Price to be
+  confirmed" because the rate card is empty.
+
 ## Live verification (2026-10-13)
 
 * **Discovery:** Mehdipatnam, Hyderabad (0.6 km, 1 cell) gave 23 businesses in 8.8 s. OSM listed

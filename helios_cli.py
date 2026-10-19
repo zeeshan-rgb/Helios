@@ -762,9 +762,10 @@ def cmd_gmail(args) -> int:
 
 def cmd_prospects(args) -> int:
     """Business prospecting: `helios prospects [list [STATUS|A|B|C] | show <id> | run [area] |
-    scan <area> | research <id> | audit <url> | approve <id> | reject <id> | archive <id> |
-    gmail <id> | sent <id> | status <id> REPLIED|INTERESTED|NOT_INTERESTED|CLOSED | sync |
-    coverage]`. Helios researches and drafts; YOU approve and send."""
+    scan <area> | research <id> | audit <url> | proposal <id> | approve <id> | reject <id> |
+    archive <id> | gmail <id> | sent <id> | status <id> REPLIED|INTERESTED|NOT_INTERESTED|CLOSED |
+    sync | coverage]`. `list needs_pricing` shows quotes waiting for your rate card.
+    Helios researches and drafts; YOU approve and send."""
     _conf()
     from helios.prospecting import engine, outreach, store
     args = list(args or [])
@@ -777,6 +778,9 @@ def cmd_prospects(args) -> int:
     try:
         if action == "list":
             f = args[0].upper() if args else ""
+            if f in ("NEEDS_PRICING", "NEEDS-PRICING"):
+                print(engine.format_list(engine.needs_pricing()))
+                return 0
             kw = {"priority": f} if f in ("A", "B", "C") else ({"status": f} if f else {})
             print(engine.format_list(store.list_prospects(limit=40, **kw)))
         elif action == "show":
@@ -823,6 +827,14 @@ def cmd_prospects(args) -> int:
                   "send it yourself — then `helios prospects sent {0}`.".format(p["id"]))
         elif action in ("reject", "archive"):
             print(engine.format_prospect(store.set_status(pid(), action.upper() + "ED" if action == "reject" else "ARCHIVED")))
+        elif action == "proposal":
+            from helios.prospecting import proposal
+            p = store.get(pid())
+            if not p:
+                raise store.StatusError("no such prospect")
+            res = proposal.write(p)
+            print(res["text"])
+            print(f"\n({res['status']}: {res['path']} — edit it in Obsidian; Helios never sends it)")
         elif action == "gmail":
             d = outreach.to_gmail_draft(pid())
             print(f"In your Gmail drafts (to {d['to']}). Send it from Gmail; Helios notices it in Sent mail "

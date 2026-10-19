@@ -295,6 +295,16 @@ def approve(pid: int, *, by: str = "user") -> dict:
     return get(pid)
 
 
+def log_event(pid: int, event: str, by: str = "helios") -> None:
+    """Append a non-status event to the prospect's history (status changes have their own paths)."""
+    p = get(pid)
+    if not p:
+        return
+    log = p.get("contact_log") or []
+    log.append({"at": now(), "event": event[:200], "by": by})
+    _write(pid, {"contact_log": log})
+
+
 def edit_draft(pid: int, *, subject: str, body: str, by: str = "user") -> dict:
     """The user's own edit of the outreach text — only while it's DRAFTED (before approval), so an
     approved message can't change afterwards. The evidence list is kept; the edit is logged."""

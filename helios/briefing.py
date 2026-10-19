@@ -144,6 +144,10 @@ def build(now: datetime | None = None, rec: dict | None = None) -> dict:
     b["prospects"] = {"status": bp.get("status", "not run"), "summary": bp.get("summary", ""),
                       **(bp.get("data") or {})}
 
+    tasks = (rec or {}).get("tasks") or {}
+    b["n_tasks"] = len(tasks)
+    b["skipped"] = [{"task": n, "why": t.get("summary", "")} for n, t in tasks.items() if t.get("status") == "skipped"]
+    b["slept"] = [{"from": a, "to": z, "task": n} for a, z, n in ((rec or {}).get("slept") or [])]
     if rec and rec.get("tasks"):
         b["sections"] = morning_report.collect(rec)
     return b
@@ -166,12 +170,33 @@ def _night_sentence(b: dict) -> str:
         return f"Night Mode finished, but {n or 'some'} task(s) failed"
     if s == "running":
         return "Night Mode is still running"
+    skipped = b.get("skipped") or []
+    if skipped:
+        return (f"Night Mode finished, but {len(skipped)} of {b.get('n_tasks') or len(skipped)} task(s) were "
+                f"skipped ({_skip_reasons(skipped)})")
     return "Night Mode finished without problems"
+
+
+def _skip_reasons(skipped: list[dict]) -> str:
+    """'window ended: leads, memory; low battery: checks' — grouped, short."""
+    groups: dict[str, list[str]] = {}
+    for s in skipped:
+        w = s["why"].lower()
+        why = ("the night window ended" if "window ended" in w else "low battery" if "battery" in w
+               else "offline" if "offline" in w else "turned off or not set up" if any(
+                   x in w for x in ("off", "not configured", "no research", "no areas", "disabled")) else "other")
+        groups.setdefault(why, []).append(s["task"].replace("_", " "))
+    return "; ".join(f"{k}: {', '.join(v)}" for k, v in groups.items())
 
 
 def render(b: dict) -> str:
     d = datetime.fromisoformat(b["date"]).strftime("%A %d %B %Y")
     out = [f"# Good morning, sir — {d}", "", f"_{_night_sentence(b)}._", ""]
+    for s in b.get("slept") or []:
+        out += [f"_The PC was asleep from {s['from'][11:16]} to {s['to'][:16].replace('T', ' ')} during "
+                f"{s['task'].replace('_', ' ')}._", ""]
+    if b.get("skipped"):
+        out += ["## Skipped tonight", ""] + [f"- {s['task'].replace('_', ' ')} — {s['why']}" for s in b["skipped"]] + [""]
     out += ["## Overnight activity", ""]
     if not b["projects"]:
         out += ["- no projects configured (`helios projects add <folder>`)", ""]
@@ -348,13 +373,14 @@ def tick(now: datetime | None = None, emit=None) -> str:
         return "early"
     today = now.date().isoformat()
     st = _state()
-    if st.get(today, {}).get("prepared"):
-        return "done"
     from .night_mode import scheduler as night
+    if st.get(today, {}).get("prepared"):
+        return "refreshed" if _refresh_if_stale(today, now) else "done"
     if night.is_running() and now < brief_time(now.date()) + timedelta(hours=2):
         return "waiting"                      # let tonight's run finish first (up to 2 h)
     out = prepare(now)
     st[today] = {"prepared": now.isoformat(timespec="seconds"), "night": out["briefing"]["night"],
+                 "night_status": out["briefing"]["night_status"],
                  "spoken_text": out["spoken"], "spoken": False, "path": out["path"]}
     _save_state(st)
     try:
@@ -374,6 +400,27 @@ def tick(now: datetime | None = None, emit=None) -> str:
         except Exception:
             pass
     return "prepared"
+
+
+def _refresh_if_stale(day: str, now: datetime | None = None) -> bool:
+    """A briefing written while the night was still running is rebuilt once the night has
+    finished (quietly — no second notification), so neither the file nor the spoken text keeps
+    saying "still running"."""
+    from .night_mode import scheduler as night
+    st = _state()
+    entry = st.get(day) or {}
+    if entry.get("night_status") != "running" and "still running" not in (entry.get("spoken_text") or ""):
+        return False
+    if night.is_running():
+        return False
+    out = prepare(now)
+    entry.update(night=out["briefing"]["night"], night_status=out["briefing"]["night_status"],
+                 spoken_text=out["spoken"], path=out["path"],
+                 refreshed=(now or datetime.now()).isoformat(timespec="seconds"))
+    st[day] = entry
+    _save_state(st)
+    conf.log("briefing", f"refreshed {day}: the night finished after the briefing was prepared")
+    return True
 
 
 def on_wake(publish, now: datetime | None = None) -> bool:
@@ -409,6 +456,8 @@ def latest_text(day: str | None = None, *, spoken_version: bool = False) -> str:
     """Today's (or a given day's) briefing — prepared on the spot if it doesn't exist yet."""
     day = day or date.today().isoformat()
     f = briefing_path(day)
+    if day == date.today().isoformat():
+        _refresh_if_stale(day)
     if spoken_version:
         entry = _state().get(day) or {}
         return entry.get("spoken_text") or prepare()["spoken"]

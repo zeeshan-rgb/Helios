@@ -308,6 +308,9 @@ function handleVoice(data) {
   if (state === "off" || state === "disabled") {
     setMic(false, false); hideVoiceHud(0); voiceActive = false; setUiState(busy ? "thinking" : "idle"); return;
   }
+  if (state === "dormant") {   // asleep: the mic only listens for the wake gesture
+    setMic(true, false); hideVoiceHud(0); voiceActive = false; setUiState(busy ? "thinking" : "idle"); return;
+  }
   setMic(true, state === "listening" || state === "speaking" || state === "dictation");
   // The recognized command becomes a user bubble so the conversation reads naturally.
   if (data && data.transcript && data.transcript !== voiceShown) {

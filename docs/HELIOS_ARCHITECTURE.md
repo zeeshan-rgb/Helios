@@ -80,7 +80,7 @@ verification → TTS`
 | Browser + web | `web/browser.py`, `web/policy.py`, `web/scraper.py`, `web/extractor.py`, `web/sources.py`, `web/cache.py` | [HELIOS_BROWSER.md](HELIOS_BROWSER.md), [HELIOS_WEB_SCRAPING.md](HELIOS_WEB_SCRAPING.md) |
 | Memory + learning | `memory.py`, `memory_store.py`, `learning.py` | [HELIOS_MEMORY.md](HELIOS_MEMORY.md) |
 | Night Mode + jobs | `night_mode/*`, `jobs.py`, `briefing.py` | [HELIOS_NIGHT_MODE.md](HELIOS_NIGHT_MODE.md) |
-| Research, leads, prospecting | `research.py`, `leads.py`, `prospecting/*` | [HELIOS_PROSPECTING.md](HELIOS_PROSPECTING.md) |
+| Research, leads, prospecting | `research.py`, `leads.py`, `prospecting/*` | [HELIOS_BUSINESS_PROSPECTING.md](HELIOS_BUSINESS_PROSPECTING.md) |
 | Projects + health | `projects.py`, `health.py` | (in-code docstrings; `helios projects --help`) |
 | Gmail, Polarion | `gmail.py`, `polarion.py` | `HELIOS_SETUP.md` (local) |
 | MCP | `mcp/helios_server.py`, `mcp/helios_public_server.py` | [HELIOS_MCP.md](HELIOS_MCP.md), [ANTIGRAVITY_MCP.md](ANTIGRAVITY_MCP.md) |

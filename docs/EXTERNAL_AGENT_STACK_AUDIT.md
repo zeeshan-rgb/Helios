@@ -4,6 +4,24 @@ Date: 2026-10-07. Scope: the seven repositories proposed for Helios's multimodal
 intelligence work, plus the data sources needed by the Business Prospecting engine. Nothing in
 Helios's source was changed for this audit.
 
+> **Re-checked in the final audit (2026-10-14).** The decisions below were reconfirmed against
+> what Helios runs today, and no new dependency was added:
+>
+> | Project | Decision | Status today |
+> |---|---|---|
+> | Playwright | USE | in production: the hidden browser, with a live Edge test passing |
+> | Trafilatura | USE | in production: clean extraction, verified live |
+> | faster-whisper | USE | `base.en`, CPU int8, cache on D:, loaded live |
+> | Windows OCR | USE | in production |
+> | UFO² and pywinauto | REFERENCE ONLY | cua-driver + `uiautomation` cover the need |
+> | Browser Use and OmniParser | REJECT | unchanged reasons: dependency pins / API key / telemetry; no GPU |
+>
+> The final audit's live discovery test showed that one overloaded Overpass instance could stop
+> prospecting. A public mirror fallback was added (configurable; https only).
+>
+> A fresh look at upstream release versions was started but interrupted. The decisions don't
+> depend on version numbers, so refresh them the next time a dependency is upgraded.
+
 ## 0. Baseline
 
 | Item | Value |

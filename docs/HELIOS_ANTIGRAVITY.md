@@ -80,7 +80,14 @@ window are **not exposed**. The dashboard says exactly that instead of guessing.
 measure, it does:
 - Every agy run's input/output tokens go to `data/usage.jsonl` (`helios usage`, the dashboard,
   `ai_usage`).
-- Measured on 2026-10-14: about **26k input tokens per turn**, most of it agy's own system prompt.
+- Measured on 2026-10-14: about **26k input tokens per turn** for a bare, tool-less turn (mostly
+  agy's own system prompt). A **live chat turn costs far more**: a one-line "What time is it?" in
+  the real persistent session used **183k input / 13.6k output tokens**. The persistent session
+  carries the conversation's history plus the persona and the MCP tool definitions; output
+  includes the model's thinking. Starting a new conversation ("+" in the title bar) resets the
+  history part.
+- agy self-updates: 1.2.13 at setup, **1.3.5** on 2026-10-14; the adapter keeps working because it
+  only uses documented flags.
   Per-reply memory write-back is therefore off (`memory_writeback = false`); Night Mode learns from
   the day's log instead.
 
@@ -94,6 +101,15 @@ Live, 2026-10-14 (`D:\Helios\data\agy-test\p12-final-result.json`):
 | Streaming + persistent session | two turns in **one process**, both streamed; turn 2 recalled a code word from turn 1; gate marker present both turns |
 | Process recovery | the agy process was **killed**; a **new process** resumed the same conversation id and still recalled the code word; no gate failure |
 | Engine reachability | `agy models` listed 6 models (cached probe, refreshed from the dashboard) |
+
+Also live (final audit, 2026-10-14):
+- Voice text "What time is it?" (synthesized by Kokoro, transcribed by faster-whisper) went
+  through the running app's brain and returned "It is 11:01 PM, sir." — correct, in 21.8 s.
+- `tests/test_gap_closure.py` adds the lifecycle cases:
+  - a hung agy killed at its timeout, with the workspace cleaned up
+  - stdout and stderr kept apart (garbage lines ignored; a result printed on stderr is not
+    trusted)
+  - a missing agy fails gracefully
 
 Unit tests: `tests/test_antigravity.py` (translation, hard rails, marker + tamper kill, persistent
 session, stale resume, restart, one-shot and research modes) with a scripted stand-in agy.

@@ -259,6 +259,19 @@ def heartbeat(now: datetime) -> None:
     _save_state(st)
 
 
+def slept_during(a: datetime, b: datetime) -> list[tuple[datetime, datetime]]:
+    """Heartbeat gaps (PC asleep / app frozen) that overlap the interval [a, b]."""
+    out = []
+    for x, y in _state().get("gaps", []):
+        try:
+            x, y = datetime.fromisoformat(x), datetime.fromisoformat(y)
+        except ValueError:
+            continue
+        if x < b and y > a:
+            out.append((x, y))
+    return out
+
+
 def missed_reason(ws: datetime, we: datetime, now: datetime) -> str:
     boot, started = boot_time(), app_start_time()
     if boot and boot > ws:
@@ -423,7 +436,10 @@ def _run(key, ws, we, now, *, scheduled, only, wait, emit, stop, sleep) -> dict:
         since = last_successful_finish() or (now - timedelta(hours=24))
         rec["online"] = online()
         ctx = {"night": key, "window_start": ws, "window_end": we, "since": since,
-               "days": _days_since(since, datetime.now()), "online": rec["online"]}
+               "days": _days_since(since, datetime.now()), "online": rec["online"],
+               # long tasks stop starting new work after this (scheduled runs only — a manual run
+               # in the daytime has no window to respect)
+               "deadline": we if scheduled else None}
         log(f"since {since:%Y-%m-%d %H:%M}; days {ctx['days']}; {'online' if rec['online'] else 'OFFLINE'}")
         save_run(rec)
         for name, at in steps:
@@ -443,13 +459,19 @@ def _run(key, ws, we, now, *, scheduled, only, wait, emit, stop, sleep) -> dict:
             else:
                 why = ""
                 log(f"{name}: start — {desc}")
-                t0 = time.monotonic()
+                t0, started_at = time.monotonic(), datetime.now()
                 try:
                     res = fn(ctx)
                 except Exception as e:           # one task failing never stops the others
                     res = Result(status="failed", summary=f"{type(e).__name__}: {e}"[:300])
                 took = round(time.monotonic() - t0, 1)
                 log(f"{name}: {res.status} in {took}s — {res.summary}")
+                for a, b in slept_during(started_at, datetime.now()):
+                    note = f"the PC was asleep from {a:%H:%M} to {b:%Y-%m-%d %H:%M} during {name}"
+                    log(note)
+                    res.observed.append(note)
+                    rec.setdefault("slept", []).append([a.isoformat(timespec="seconds"),
+                                                        b.isoformat(timespec="seconds"), name])
             if why:
                 log(f"{name}: skipped — {res.summary}")
             rec["tasks"][name] = res.as_dict() | {"at": datetime.now().isoformat(timespec="seconds")}

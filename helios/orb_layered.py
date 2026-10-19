@@ -645,7 +645,7 @@ class Orb:
                             # Voice owns the orb during a voice interaction (listening /
                             # speaking / dictation are states brain events can't express).
                             vs = (msg.get("data") or {}).get("state")
-                            if vs in ("idle", "off", "disabled"):
+                            if vs in ("idle", "off", "disabled", "dormant"):
                                 self.voice_active = False
                                 self.state = "idle"
                             elif vs in ("listening", "speaking", "thinking", "dictation"):

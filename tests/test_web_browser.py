@@ -139,6 +139,8 @@ class FakePage:
         if "querySelectorAll(sel)" in js:                      # snapshot
             return [{"ref": r, "tag": i["tag"], "type": i.get("type", ""), "role": "", "label": i.get("text", ""),
                      "href": i.get("href", ""), "in_view": True, "disabled": False} for r, i in self.elements.items()]
+        if "scrollWidth" in js:                                # audit's phone-width check
+            return {"w": 390, "vw": 390}
         return {"title": self._title, "headings": []}
 
     def locator(self, sel):
@@ -149,6 +151,15 @@ class FakePage:
 
     def content(self):
         return "<html></html>"
+
+    def set_viewport_size(self, size):
+        self.viewport = size
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def on(self, event, handler):
+        pass
 
     suggested = "report.pdf"
 
@@ -462,6 +473,21 @@ def test_download_saves_inside_helios_data_with_a_safe_name(br, tmp_path):
     assert out2.resolve().is_relative_to(out.parent.resolve())
     log = (bmod.conf.LOGS_DIR / "browser.log").read_text(encoding="utf-8")
     assert "downloaded report.pdf" in log
+
+
+def test_slow_audit_load_is_retimed_before_it_counts(br, monkeypatch):
+    br.open("https://example.com/")                         # starts the (fake) browser
+    monkeypatch.setattr(bmod, "SLOW_RETIME_MS", -1)         # treat every first load as slow
+    f = br.audit("https://example.com/shop")
+    assert len(f["load_samples"]) == 2 and f["load_ms"] == min(f["load_samples"])
+    monkeypatch.setattr(bmod, "SLOW_RETIME_MS", 10**9)
+    assert len(br.audit("https://example.com/shop")["load_samples"]) == 1
+    from helios.prospecting import scoring
+    _, reasons = scoring.website_score({"website_status": "ok", "website": "https://x.example", "audit": {
+        "url": "https://x.example", "https": True, "has_viewport": True, "load_ms": 9000,
+        "load_samples": [12000, 9000], "title": "t", "description": "d", "h1": 1, "phones": ["1"]}})
+    slow = next(r for r in reasons if r["factor"] == "very slow")
+    assert "best of 2 loads" in slow["detail"]
 
 
 def test_new_tab_as_the_very_first_call(br):

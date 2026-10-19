@@ -101,6 +101,7 @@ def analyse(facts: dict, *, website: str) -> dict:
     out = {
         "url": final, "status": facts.get("status"), "https": final.lower().startswith("https://"),
         "redirects": facts.get("redirects") or [], "load_ms": facts.get("load_ms"),
+        "load_samples": facts.get("load_samples") or ([facts["load_ms"]] if facts.get("load_ms") else []),
         "title": (facts.get("title") or "")[:120], "description": (facts.get("description") or "")[:200],
         "has_viewport": "width=device-width" in (facts.get("viewport") or "").replace(" ", ""),
         "mobile_overflow": bool(facts.get("mobile_overflow")),

@@ -227,6 +227,7 @@ class VoiceDaemon:
                 self.clap.reset(grace=1.0)   # the click/tap that put Helios to sleep can't wake it
                 self.tts.stop()
                 self._turn_complete.set()  # unblock any wait so the loop returns to dormant
+                self._set_state("dormant")
                 conf.log("voice", "went dormant (control)")
             elif action == "mute" and not self.muted:
                 # Dashboard mic button off: stop listening for commands; claps still work.
@@ -992,6 +993,9 @@ class VoiceDaemon:
         # Start ambient monitor
         self.ambient.start()
         if self.dormant:
+            # Tell the UI the truth: asleep, waiting for the wake gesture (and why the wake word
+            # can't wake it, if it can't) — not "ready" and not silent.
+            self.bridge.post_voice_state("dormant", **self._wake_fields())
             conf.log("voice", "voice daemon started (dormant — listening for the wake gesture)")
         elif self.muted:
             self.bridge.post_voice_state("off", **self._wake_fields())

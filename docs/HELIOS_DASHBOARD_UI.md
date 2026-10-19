@@ -75,6 +75,7 @@ It reflects real state only, in this priority order:
 | Processing... | Daemon `thinking`, or a brain turn is running |
 | Antigravity unavailable | Engine check failed (hover for the reason) |
 | Microphone muted / No microphone found | Daemon `off` / `disabled` |
+| Asleep — double-clap to wake | Daemon `dormant` (Helios's normal boot state; added by the final audit — it used to show "Online & Ready" while asleep) |
 | Online & Ready | Otherwise |
 
 Below the status: mic state (on / live / muted / daemon not running / voice off) and wake-word
@@ -117,6 +118,26 @@ readiness, reported by the daemon itself. With `prefers-reduced-motion`, all ani
 
 Columns and cards scroll internally, so the page never scrolls horizontally. The leads table drops
 its Source, Area and Website columns as the workspace narrows (container queries).
+
+## Verification on the running app (2026-10-14, final audit)
+
+Screenshots of the **real** app (`helios start` → `http://127.0.0.1:8769`), real data:
+- **1366×768, 1536×864, 1920×1080:** no horizontal overflow, no console errors.
+- **Robot and Model Limits:** the robot showed the daemon's real "Asleep — double-clap to wake" and
+  the exact wake-model reason. Model Limits showed agy reachable, the quota "Not exposed", and
+  Helios-measured usage.
+- **Real data:** metrics showed 65–66 businesses from the live scan and today's real token count.
+
+Fixed during the check:
+- **Blank right panel:** it was blank when businesses existed but none were qualified. It now
+  shows "Nothing qualified yet — pick a row".
+- **Night Mode indicator:**
+  - It now shows the last **scheduled** night: a manual run is never passed off as a night.
+  - It counts skipped tasks ("last night: completed (7 of 9 tasks skipped)").
+
+New:
+- **"Prepare proposal"** button in the right panel.
+- **"Needs pricing"** filter on Top leads.
 
 ## Verification (2026-10-13)
 

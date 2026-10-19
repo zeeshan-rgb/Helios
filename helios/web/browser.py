@@ -121,6 +121,9 @@ _LAUNCH_ARGS = ["--disable-extensions", "--disable-background-networking", "--di
                 "msEdgeShopping,msEdgeDiscoverHub,AutofillServerCommunication"]
 
 
+SLOW_RETIME_MS = 4500      # an audit load slower than this is timed a second time before it counts
+
+
 class BrowserError(Exception):
     pass
 
@@ -530,6 +533,27 @@ class Browser:
                 p.close()
                 raise BrowserError(f"couldn't load {url}: {str(e).splitlines()[0][:200]}") from None
             load_ms = int((time.monotonic() - t0) * 1000)
+            samples = [load_ms]
+            if load_ms > SLOW_RETIME_MS:
+                # One slow sample isn't evidence (a network blip would end up in an outreach email
+                # as "your site is slow"): re-time once in a fresh, cache-free context, keep the best.
+                ctx2 = None
+                try:
+                    ctx2 = self._browser.new_context(service_workers="block")
+                    ctx2.route("**/*", self._route)
+                    p2 = ctx2.new_page()
+                    t1 = time.monotonic()
+                    p2.goto(url, wait_until="load")
+                    samples.append(int((time.monotonic() - t1) * 1000))
+                    load_ms = min(samples)
+                except Exception:
+                    pass
+                finally:
+                    if ctx2 is not None:
+                        try:
+                            ctx2.close()
+                        except Exception:
+                            pass
             try:
                 p.wait_for_load_state("networkidle", timeout=5000)
             except Exception:
@@ -543,7 +567,7 @@ class Browser:
             finally:
                 p.close()
             facts.update(final_url=info["url"], status=info["status"], redirects=info["redirects"],
-                         load_ms=load_ms, console_errors=errors[:10],
+                         load_ms=load_ms, load_samples=samples, console_errors=errors[:10],
                          mobile_overflow=bool(mob["w"] > mob["vw"] + 8), mobile_width=mob["w"])
             return facts
         return self._run(go, timeout=self.timeout_ms / 1000 + 40)

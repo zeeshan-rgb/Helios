@@ -11,5 +11,5 @@
 
 Helios researches, scores, drafts and queues. It never sends email / WhatsApp / SMS / DMs, never
 submits forms, and a prospect can only become CONTACTED after an approved, verified send.
-See docs/HELIOS_PROSPECTING.md.
+See docs/HELIOS_BUSINESS_PROSPECTING.md.
 """

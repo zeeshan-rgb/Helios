@@ -805,6 +805,21 @@ def prospects_run(area: str = "", research: int = 8) -> str:
 
 
 @mcp.tool()
+def prospect_proposal(prospect_id: int) -> str:
+    """Prepare the editable quotation / proposal for one prospect ("prepare a quotation for #12"):
+    observed findings with evidence, recommended package, scope and deliverables, optional
+    integrations, price from the user's rate card (or 'to be confirmed' — never invented), timeline,
+    assumptions, exclusions and sources. Saved as a Markdown note in the vault's Proposals folder for
+    the user to edit; an edited proposal is never overwritten. Nothing is sent."""
+    from helios.prospecting import proposal, store
+    p = store.get(int(prospect_id))
+    if not p:
+        return "No such prospect."
+    res = proposal.write(p)
+    return f"{res['text']}\n\n({res['status']}: {res['path']} — the user edits and sends it themselves)"
+
+
+@mcp.tool()
 def prospect_audit(url: str, category: str = "") -> str:
     """Audit any business website now ("audit this business's website"): HTTPS, speed, mobile
     layout, contact routes, booking/ordering/WhatsApp, reviews, SEO basics — with the website

@@ -93,10 +93,12 @@ def website_score(p: dict) -> tuple[int, list[dict]]:
     if a.get("mobile_overflow") or not a.get("has_viewport"):
         minus(1, "poor mobile layout", "the page doesn't fit a phone screen (no responsive viewport / sideways scrolling)")
     ms = a.get("load_ms") or 0
+    tries = len(a.get("load_samples") or []) or 1
+    how = f"took {ms / 1000:.1f}s to load (without images" + (f"; best of {tries} loads)" if tries > 1 else ")")
     if ms > 8000:
-        minus(1.5, "very slow", f"took {ms / 1000:.1f}s to load (without images)")
+        minus(1.5, "very slow", how)
     elif ms > 4500:
-        minus(0.5, "slow", f"took {ms / 1000:.1f}s to load (without images)")
+        minus(0.5, "slow", how)
     if not (a.get("phones") or a.get("emails") or a.get("contact_form") or a.get("whatsapp")):
         minus(1, "hard to contact", "no phone, email, form or WhatsApp found on the page")
     if a.get("outdated"):
@@ -139,6 +141,16 @@ def ai_score(p: dict) -> tuple[int, list[dict]]:
             add(2, "appointment business without online booking",
                 f"{label(cat, article=True)} works by appointment but has no website of its own, so customers can't "
                 "book directly online — an AI booking assistant could collect requests 24/7", ev)
+    if cat in geo.ENROLMENT and not (has_site and (a.get("contact_form") or a.get("booking"))):
+        if has_site:
+            add(1, "no online enquiry or admission form",
+                f"{label(cat, article=True)} takes enquiries and admissions, but its website has no enquiry form or "
+                "way to book a visit — an AI enquiry assistant could answer admission questions and collect "
+                "enquiries after hours", ev)
+        else:
+            add(1, "no online enquiry or admission form",
+                f"{label(cat, article=True)} takes enquiries and admissions but has no website of its own, so "
+                "families can't enquire online", ev)
     if cat in geo.ORDERING and not (has_site and a.get("ordering")):
         if platforms and not has_site:
             add(1, "orders only through delivery apps",
@@ -157,7 +169,7 @@ def ai_score(p: dict) -> tuple[int, list[dict]]:
         add(1, "enquiries only by phone",
             "the only contact route is a phone number, so calls outside opening hours are missed — an AI "
             "enquiry assistant could capture them")
-    if has_site and not a.get("whatsapp") and cat in (geo.APPOINTMENT | geo.ORDERING | geo.RETAIL):
+    if has_site and not a.get("whatsapp") and cat in (geo.APPOINTMENT | geo.ORDERING | geo.RETAIL | geo.ENROLMENT):
         add(1, "no WhatsApp option", "customers can't start a WhatsApp chat from the site (opt-in click-to-chat)")
     if has_site and (a.get("service_mentions") or 0) >= 8 and (a.get("words") or 0) > 600:
         add(1, "many services / FAQs", "the site lists many services — an AI FAQ assistant could answer "

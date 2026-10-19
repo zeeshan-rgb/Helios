@@ -1,6 +1,6 @@
 # Helios
 
-![version](https://img.shields.io/badge/version-0.10.0-1f6feb?style=flat-square) ![python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square&logo=python&logoColor=white) ![platform](https://img.shields.io/badge/platform-Windows%2011-0078d6?style=flat-square&logo=windows&logoColor=white) ![brain](https://img.shields.io/badge/brain-Antigravity%20CLI-4285f4?style=flat-square) ![tests](https://img.shields.io/badge/tests-1033%20passing-2ea043?style=flat-square)
+![version](https://img.shields.io/badge/version-0.10.0-1f6feb?style=flat-square) ![python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square&logo=python&logoColor=white) ![platform](https://img.shields.io/badge/platform-Windows%2011-0078d6?style=flat-square&logo=windows&logoColor=white) ![brain](https://img.shields.io/badge/brain-Antigravity%20CLI-4285f4?style=flat-square) ![tests](https://img.shields.io/badge/tests-1057%20passing-2ea043?style=flat-square)
 
 A local, always-on AI assistant for Windows. It **thinks with Google Antigravity** (the official
 `agy` CLI on your Google AI Pro account — no API key; Claude Code and OpenAI-compatible "lite"
@@ -40,6 +40,7 @@ Then sign agy in once (`agy` in a terminal), set `[brain] engine = "antigravity"
 
 | | |
 |---|---|
+| [HELIOS_FINAL_AUDIT.md](docs/HELIOS_FINAL_AUDIT.md) · [HELIOS_GAP_ANALYSIS.md](docs/HELIOS_GAP_ANALYSIS.md) · [HELIOS_TEST_REPORT.md](docs/HELIOS_TEST_REPORT.md) | the final audit: per-feature evidence, the requirements matrix with fixes, tests and live acceptance |
 | [HELIOS_IMPLEMENTATION_STATUS.md](docs/HELIOS_IMPLEMENTATION_STATUS.md) | what's DONE / PARTIAL / BLOCKED, and what's waiting on you |
 | [HELIOS_ARCHITECTURE.md](docs/HELIOS_ARCHITECTURE.md) | the map: processes, request flow, code, data |
 | [HELIOS_ANTIGRAVITY.md](docs/HELIOS_ANTIGRAVITY.md) | the brain engine, gate proof, sessions, verification |
@@ -48,7 +49,7 @@ Then sign agy in once (`agy` in a terminal), set `[brain] engine = "antigravity"
 | [HELIOS_SCREEN_INTELLIGENCE.md](docs/HELIOS_SCREEN_INTELLIGENCE.md) · [HELIOS_WINDOWS_CONTROL.md](docs/HELIOS_WINDOWS_CONTROL.md) | screen reading, perceive / locate, acting by element |
 | [HELIOS_BROWSER.md](docs/HELIOS_BROWSER.md) · [HELIOS_WEB_SCRAPING.md](docs/HELIOS_WEB_SCRAPING.md) | hidden browser, clean extraction |
 | [HELIOS_MEMORY.md](docs/HELIOS_MEMORY.md) · [HELIOS_NIGHT_MODE.md](docs/HELIOS_NIGHT_MODE.md) | memory layers, learning, overnight work |
-| [HELIOS_PROSPECTING.md](docs/HELIOS_PROSPECTING.md) | local-business website opportunities (never sends) |
+| [HELIOS_BUSINESS_PROSPECTING.md](docs/HELIOS_BUSINESS_PROSPECTING.md) | local-business website opportunities (never sends) |
 | [HELIOS_MCP.md](docs/HELIOS_MCP.md) · [ANTIGRAVITY_MCP.md](docs/ANTIGRAVITY_MCP.md) | MCP servers, using Helios from Antigravity |
 | [HELIOS_DASHBOARD_UI.md](docs/HELIOS_DASHBOARD_UI.md) | the dashboard |
 | [EXTERNAL_AGENT_STACK_AUDIT.md](docs/EXTERNAL_AGENT_STACK_AUDIT.md) | what was integrated, referenced or rejected, and why |

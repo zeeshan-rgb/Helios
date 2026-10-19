@@ -440,15 +440,25 @@ def research_topic(topic: str, project: str = "", *, call=None, verify=None) -> 
     return rep
 
 
-def run(topic_names: list[str] | None = None, *, call=None, verify=None) -> list[dict]:
-    """Research the given topics (or the next ones in rotation). Returns per-topic reports."""
+def run(topic_names: list[str] | None = None, *, call=None, verify=None,
+        deadline: datetime | None = None) -> list[dict]:
+    """Research the given topics (or the next ones in rotation). Returns per-topic reports.
+    With a deadline (Night Mode's window end), no new topic starts after it — those come back
+    with skipped=True."""
     if topic_names:
         known = {t["topic"].lower(): t for t in topics()}
         chosen = [known.get(n.lower(), {"topic": n.strip(), "project": ""}) for n in topic_names if n.strip()]
     else:
         chosen = pick()
     try:
-        return [research_topic(t["topic"], t["project"], call=call, verify=verify) for t in chosen]
+        out = []
+        for t in chosen:
+            if deadline and datetime.now() >= deadline:
+                out.append({"topic": t["topic"], "project": t["project"], "error": "", "new": [],
+                            "duplicates": [], "seconds": 0, "skipped": True})
+                continue
+            out.append(research_topic(t["topic"], t["project"], call=call, verify=verify))
+        return out
     finally:
         from .web import browser
         browser.close_shared()           # don't keep ~650 MB of headless Edge around afterwards
@@ -461,9 +471,13 @@ def night_task(ctx: dict):
         return Result.skipped("research is off ([research] enabled = false)")
     if not topics():
         return Result.skipped("no research topics configured")
-    reports = run()
+    reports = run(deadline=ctx.get("deadline"))
     res = Result()
     new = dup = 0
+    skipped = [r["topic"] for r in reports if r.get("skipped")]
+    if skipped:
+        res.observed.append(f"not started (the night window ended): {', '.join(skipped)}")
+    reports = [r for r in reports if not r.get("skipped")]
     for r in reports:
         if r["error"]:
             res.failed.append(f"research {r['topic']}: {r['error']}")
@@ -478,7 +492,8 @@ def night_task(ctx: dict):
                                 f"(confidence {f['confidence']:.1f}{check})")
     if reports and all(r["error"] for r in reports):
         res.status = "failed"
-    res.summary = f"{len(reports)} topic(s): {new} new finding(s), {dup} already known"
+    res.summary = f"{len(reports)} topic(s): {new} new finding(s), {dup} already known" + \
+        (f"; {len(skipped)} not started (window ended)" if skipped else "")
     top = sorted((f for r in reports for f in r["new"]),
                  key=lambda f: (f["source_check"] != "ok", -f["confidence"]))
     res.data = {"new": new, "duplicates": dup, "topics": [r["topic"] for r in reports],

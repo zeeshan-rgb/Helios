@@ -115,14 +115,28 @@ def research(pid: int, *, auditor=None, fetch=None, robots=None, link_check: boo
         store.set_status(pid, "RESEARCHED")
     p = store.get(pid)
     if not sc["qualified"]:
-        return p
+        if p["status"] in ("QUALIFIED", "DRAFTED"):
+            # The fresh evidence no longer supports a pitch: withdraw it from the approval queue
+            # rather than leave an email whose claims don't match the audit any more.
+            d = dict(p.get("draft") or {})
+            if d:
+                d["withdrawn"] = store.now()
+                store.update(pid, draft=d)
+            store.set_status(pid, "RESEARCHED")
+            store.log_event(pid, "no longer qualifies after re-research — draft withdrawn", by="helios")
+        return store.get(pid)
     store.update(pid, quote=quote.build(p))
     newly = p["status"] in ("NEW", "RESEARCHED")
     if newly:
         store.set_status(pid, "QUALIFIED")
     p = store.get(pid)
     if p.get("email") or p.get("phone"):
-        store.update(pid, draft=outreach.build_draft(p) if p.get("email") else outreach.build_call_notes(p))
+        old = p.get("draft") or {}
+        if old.get("edited_by") and not old.get("withdrawn"):
+            # Never overwrite the user's own text — flag it instead so they can re-check the claims.
+            store.update(pid, draft={**old, "outdated": store.now()})
+        else:
+            store.update(pid, draft=outreach.build_draft(p) if p.get("email") else outreach.build_call_notes(p))
         if p["status"] == "QUALIFIED":
             store.set_status(pid, "DRAFTED")
     if newly:
@@ -190,7 +204,9 @@ def run(*, area: str | None = None, max_cells: int | None = None, max_research: 
     if max_research != 0:
         report["search"] = verify_presence(batches=search_batches, call=searcher)
         report["errors"] += report["search"].get("errors", [])
-    for p in _research_queue(max_research or _int("max_research_per_run", 12, 1, 100)):
+    # 0 means "scan only" — `max_research or default` used to turn it into the default (12).
+    n = max_research if max_research is not None else _int("max_research_per_run", 12, 1, 100)
+    for p in (_research_queue(n) if n > 0 else []):
         try:
             r = research(p["id"], auditor=auditor, fetch=fetch, robots=robots)
         except Exception as e:
@@ -318,6 +334,15 @@ def card(p: dict) -> dict:
             "draft": {"channel": d.get("channel", "email"), "to": d.get("to", ""), "to_source": d.get("to_source", ""),
                       "subject": d.get("subject", ""), "body": d.get("body", ""), "claims": d.get("claims") or []},
             "history": p.get("contact_log") or []}
+
+
+def needs_pricing(limit: int = 200) -> list[dict]:
+    """NEEDS_PRICING view: live prospects whose recommended package has no price in your rate card.
+    A derived state (the quote says NEEDS USER PRICING), not a separate status — the draft still
+    goes ahead without a figure, so the research/approval flow isn't blocked on pricing."""
+    live = ("QUALIFIED", "DRAFTED", "APPROVED")
+    return [p for p in store.list_prospects(limit=limit)
+            if p["status"] in live and (p.get("quote") or {}).get("status") == "NEEDS USER PRICING"]
 
 
 def format_list(items: list[dict]) -> str:

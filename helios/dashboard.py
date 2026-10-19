@@ -201,6 +201,9 @@ def modules() -> list[dict]:
         out.append(_mod("voice", "Voice", "warn", "microphone muted"))
     elif v["state"] == "disabled":
         out.append(_mod("voice", "Voice", "err", "no microphone found"))
+    elif v["state"] == "dormant":
+        out.append(_mod("voice", "Voice", "ok", "asleep — a double clap wakes Helios"
+                        + ("" if v.get("wake_ready") else " (wake word not available)")))
     else:
         out.append(_mod("voice", "Voice", "ok", "listening for the wake word" if v.get("wake_ready") else "running"))
 
@@ -245,10 +248,18 @@ def modules() -> list[dict]:
             return _mod("night", "Night Mode", "off", "off in settings")
         if night.is_running():
             return _mod("night", "Night Mode", "ok", "running now")
-        last = next(iter(night.runs(1)), None)
-        if last and str(last.get("status", "")).startswith(("failed", "missed")):
-            return _mod("night", "Night Mode", "warn", f"last night: {last.get('status')}")
-        return _mod("night", "Night Mode", "ok", f"last night: {last.get('status')}" if last else "no runs yet")
+        recent = night.runs(10)
+        last = next((r for r in recent if r.get("kind") != "manual"), None)     # the last real NIGHT
+        manual = next((r for r in recent if r.get("kind") == "manual"), None)
+        newer = manual and (not last or (manual.get("finished") or "") > (last.get("finished") or ""))
+        extra = f" · manual run: {manual.get('status')}" if newer else ""
+        if last and str(last.get("status", "")).startswith(("failed", "missed", "crashed", "interrupted")):
+            return _mod("night", "Night Mode", "warn", f"last night: {last.get('status')}{extra}")
+        tasks = (last or {}).get("tasks") or {}
+        skipped = sum(1 for t in tasks.values() if t.get("status") == "skipped")
+        note = f" ({skipped} of {len(tasks)} tasks skipped)" if skipped else ""
+        return _mod("night", "Night Mode", "warn" if skipped else "ok",
+                    (f"last night: {last.get('status')}{note}" if last else "no nights yet") + extra)
     out.append(_safe(_night, _mod("night", "Night Mode", "err", "couldn't read Night Mode")))
 
     def _gmail():

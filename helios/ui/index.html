@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=0.13.0" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=0.13.0" />
+  <link rel="stylesheet" href="/static/style.css?v=0.13.2" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=0.13.2" />
 </head>
 <body>
   <!-- Holographic open-animation overlay (cyan scan line + edge glow + CRT grid). Inert
@@ -237,6 +237,7 @@
                 <select id="lstatus" aria-label="Filter by status">
                   <option value="active">All active</option><option value="DRAFTED">To approve</option>
                   <option value="QUALIFIED">Qualified</option><option value="APPROVED">Approved</option>
+                  <option value="needs_pricing">Needs pricing</option>
                   <option value="contacted">Contacted</option><option value="closed">Rejected / archived</option>
                   <option value="all">Everything</option>
                 </select>
@@ -517,8 +518,8 @@
   {"imports": {"three": "/static/vendor/three170/three.module.min.js",
                "three/addons/": "/static/vendor/three170/addons/"}}
   </script>
-  <script src="/static/app.js?v=0.13.0"></script>
-  <script src="/static/dashboard.js?v=0.13.0"></script>
+  <script src="/static/app.js?v=0.13.2"></script>
+  <script src="/static/dashboard.js?v=0.13.2"></script>
   <script type="module" src="/static/viewer.js?v=0.10.0"></script>
 </body>
 </html>

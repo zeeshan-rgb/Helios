@@ -56,6 +56,14 @@ The morning briefing follows at `[briefing].time` (08:00), spoken the first time
 - **Power-aware** — heavy tasks (checks, research, leads, prospecting) are skipped on battery below
   `min_battery`, checked per task (the laptop can be unplugged mid-night); a power skip is reported,
   not counted as a failure.
+- **Sleep is reported, not hidden** — if the app's heartbeat shows the PC was asleep while a task
+  ran, the report says so ("the PC was asleep from 02:03 to 11:16 during research"). Scheduled
+  runs pass the window end as a deadline: research starts no new topic after it (the rest are
+  reported as "not started — window ended"). Found by the real night of 2026-10-14, when the
+  laptop slept at 14 % battery and research "took" 9 h 20 min.
+- **The briefing counts skips** — "Night Mode finished, but 7 of 9 task(s) were skipped (low
+  battery: run checks; the night window ended: …)" with a "Skipped tonight" section; a briefing
+  written while the night was still running is refreshed once the night finishes.
 - **Resource hygiene** — the hidden browser that research / leads / prospecting share is closed when
   the night ends (also after a crash).
 - **Offline-aware** — tasks know whether the PC is online; research skips, learning uses the no-AI

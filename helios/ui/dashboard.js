@@ -122,6 +122,7 @@
     if (eng && eng.engine === "antigravity" && eng.ok === false) return ["error", "Antigravity unavailable"];
     if (v === "off") return ["muted", "Microphone muted"];
     if (v === "disabled") return ["muted", "No microphone found"];
+    if (v === "dormant") return ["muted", "Asleep — double-clap to wake"];
     return ["idle", "Online & Ready"];
   }
   function renderRobot() {
@@ -138,6 +139,7 @@
       else if (!s.daemon && !v) mic = "Mic: voice daemon not running";
       else if (v === "off") mic = "Mic: muted — the mic button or a double-clap turns it on";
       else if (v === "disabled") mic = "Mic: no microphone found";
+      else if (v === "dormant") mic = "Mic: listening only for a double clap (or Ctrl+Alt+J)";
       else if (["listening", "speaking", "dictation", "permission"].includes(v)) mic = "Mic: live";
       else mic = "Mic: on";
     }
@@ -316,7 +318,9 @@
       if (T.status === "active" && ["ARCHIVED", "REJECTED"].includes(r.status)) return false;
       if (T.status === "contacted" && !CONTACTED.includes(r.status)) return false;
       if (T.status === "closed" && !["ARCHIVED", "REJECTED"].includes(r.status)) return false;
-      if (!["active", "contacted", "closed", "all"].includes(T.status) && r.status !== T.status) return false;
+      if (T.status === "needs_pricing" && !(r.price === "NEEDS USER PRICING" &&
+          ["QUALIFIED", "DRAFTED", "APPROVED"].includes(r.status))) return false;
+      if (!["active", "contacted", "closed", "all", "needs_pricing"].includes(T.status) && r.status !== T.status) return false;
       if (T.prio && r.priority !== T.prio) return false;
       return !q || `${r.name} ${r.area} ${r.category}`.toLowerCase().includes(q);
     });
@@ -386,7 +390,7 @@
     renderTable(); renderCoverage(data.coverage || []);
     if (selId == null || !biz.some(r => r.id === selId)) {
       const f = summary && summary.featured;
-      if (f != null) selectProspect(f, true); else if (!biz.length) renderProspect(null);
+      if (f != null) selectProspect(f, true); else renderProspect(null);   // never leave the panel blank
     }
     loadMap();
   }
@@ -488,7 +492,9 @@
   function renderProspect(p) {
     const body = g("rpbody");
     if (!p) {
-      body.innerHTML = `<div class="rpsec"><div class="empty-note"><b>No business opportunities yet.</b><br>When the prospecting engine finds and audits local businesses, the best one appears here with its audit, package and draft.</div></div>`;
+      body.innerHTML = biz.length
+        ? `<div class="rpsec"><div class="empty-note"><b>Nothing qualified yet.</b><br>${biz.length} business${biz.length === 1 ? "" : "es"} found — none researched into an opportunity so far. Pick a row in Top leads to see its details.</div></div>`
+        : `<div class="rpsec"><div class="empty-note"><b>No business opportunities yet.</b><br>When the prospecting engine finds and audits local businesses, the best one appears here with its audit, package and draft.</div></div>`;
       return;
     }
     const q = p.price || "", priced = q && q !== "NEEDS USER PRICING";
@@ -508,7 +514,8 @@
       (p.package ? `<div class="pkgname">${e(p.package)}</div>` +
         (priced ? `<div class="price">${e(q)}</div>` : `<div class="price needs">Needs your pricing — add it to [prospecting.pricing]. Helios never invents prices.</div>`) +
         (p.timeline ? `<div class="safe">Timeline: about ${e(p.timeline)}</div>` : "") +
-        ((p.features || []).length ? `<div class="feats">${p.features.slice(0, 8).map(f => `<span>${e(f)}</span>`).join("")}</div>` : "")
+        ((p.features || []).length ? `<div class="feats">${p.features.slice(0, 8).map(f => `<span>${e(f)}</span>`).join("")}</div>` : "") +
+        `<div class="dactions2"><button data-act="proposal" class="approve" style="grid-column:1/-1;background:none;color:var(--neon);border-color:rgba(34,227,255,.45)" title="Editable proposal in your vault — nothing is sent">Prepare proposal</button></div>`
         : `<div class="safe">No package yet — it's chosen once the business is researched.</div>`) +
       `</section>` +
       `<section class="rpsec"><h4>Outreach</h4>` +
@@ -530,6 +537,19 @@
     const b = ev.target.closest("button[data-act]"); if (!b || b.disabled || !cur) return;
     const act = b.dataset.act;
     if (act === "view" || act === "edit") { openDraft(cur, act === "edit"); return; }
+    if (act === "proposal") {
+      b.disabled = true;
+      try {
+        const r = await postJSON("/prospects/action", { id: cur.id, action: "proposal" });
+        const pr = r.proposal || {};
+        infoPane("Proposal — " + cur.name,
+          `<div class="help">${e({ created: "Saved", refreshed: "Updated", unchanged: "Already up to date",
+            new_version: "You had edited the previous one, so this is a new version" }[pr.status] || "Saved")}: ` +
+          `<code>${e(pr.path || "")}</code> — edit it in Obsidian. Nothing is sent.</div><pre>${e(pr.text || "")}</pre>`);
+      } catch (err) { toast("Couldn't prepare the proposal: " + err.message, "err"); }
+      b.disabled = false;
+      return;
+    }
     const msgs = { approve: `Approve the outreach for ${cur.name}?\n\nNothing is sent — you send it yourself afterwards.`,
                    reject: `Reject ${cur.name}? It leaves the queue.`, archive: `Archive ${cur.name}?` };
     if (!window.confirm(msgs[act])) return;

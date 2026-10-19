@@ -338,6 +338,14 @@ class Handler(BaseHTTPRequestHandler):
                 elif act == "edit":
                     p = pstore.edit_draft(pid, subject=str(body.get("subject") or ""),
                                           body=str(body.get("body") or ""), by="you (dashboard)")
+                elif act == "proposal":          # writes an editable note in the vault; sends nothing
+                    from .prospecting import proposal
+                    p = pstore.get(pid)
+                    if not p:
+                        raise pstore.StatusError("no such prospect")
+                    res = proposal.write(p)
+                    return self._send(200, json.dumps({"ok": True, "proposal": res, "item": pros.card(p)},
+                                                      default=str).encode())
                 elif act in ("reject", "archive"):
                     p = pstore.set_status(pid, "REJECTED" if act == "reject" else "ARCHIVED")
                 else:
