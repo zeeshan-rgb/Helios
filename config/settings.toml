@@ -222,7 +222,7 @@ device = "auto"              # auto = CUDA GPU if present, else CPU (falls back 
 compute_type = "auto"        # auto = int8 on CPU, float16 on CUDA
 language = "en"              # en | auto (detect — needs a multilingual model, not *.en) | hi, fr, ...
 beam_size = 1                # 1 = greedy, fastest; higher = slower, rarely better for short commands
-vocabulary = []              # extra words Whisper should know, e.g. ["Acme", "LiveDoc"]
+vocabulary = []              # extra words Whisper should know, e.g. ["Maqsusi", "LiveDoc"]
 
 [server]
 host = "127.0.0.1"
