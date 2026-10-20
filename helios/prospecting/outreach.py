@@ -1,12 +1,14 @@
-"""Personalised outreach drafts + the approval queue. Helios never sends.
+"""Personalised outreach drafts + the approval queue. Helios never sends on its own.
 
 The email is built from a template using only verified findings — each factual sentence is kept
 with its evidence (claims[]), so nothing in it is invented. The price line appears only when the
 quote is PRICED from your rate card.
 
-Flow: DRAFTED → you approve (APPROVED) → Helios can put it in your Gmail as a DRAFT → you send it
-yourself → Helios sees it in your Sent mail (or you run `helios prospects sent <id>`) → CONTACTED.
-Never sent automatically, never during Night Mode, never to system/no-reply addresses. WhatsApp:
+Flow: DRAFTED → you read it and click Approve & send (or say "approve" and confirm the prompt) →
+Helios sends it from your Gmail → CONTACTED with the Gmail message id as evidence. Or approve only,
+put it in Gmail drafts and send it yourself (Helios sees it in Sent → CONTACTED). Phone-only leads get
+call notes for YOU. Never sent without your explicit action, never during Night Mode, never by a
+background agent, never to system/no-reply addresses. WhatsApp:
 recommended as an opt-in feature for the business's own website — Helios never messages anyone
 on WhatsApp.
 """
@@ -95,8 +97,9 @@ def build_draft(p: dict) -> dict:
         lines.append(f"A package like this typically runs {q['display']}, ready in about {q['timeline']}.")
     lines += ["", "Would you be open to a quick 10-minute call this week? Happy to share a few examples first.",
               "", signature()]
+    poss = name + ("'" if name.endswith("s") else "'s")
     subject = f"A website idea for {name}" if p.get("website_status") in ("none", "unlisted") else \
-        f"A quick idea for {name}'s website"
+        f"A quick idea for {poss} website"
     return {"channel": "email", "subject": subject[:120], "body": "\n".join(lines), "claims": claims,
             "to": p.get("email") or "", "to_source": p.get("email_source") or "",
             "built_at": store.now(), "priced": q.get("status") == "PRICED"}
@@ -149,6 +152,60 @@ def to_gmail_draft(pid: int, *, gmail_mod=None) -> dict:
     draft = {**d, "gmail_draft_id": res.get("draft_id", ""), "gmail_drafted_at": store.now()}
     store.update(pid, draft=draft)
     return draft
+
+
+_DEFAULT_SIG = "Best regards"
+
+
+def has_signature() -> bool:
+    """A real sign-off (your name / business) is set — an email never goes out ending in a bare
+    'Best regards'."""
+    return signature().strip() != _DEFAULT_SIG
+
+
+def _final_body(body: str) -> str:
+    """Drafts built before you set a signature end in the bare default; swap in the real one."""
+    b = (body or "").rstrip()
+    if b.endswith(_DEFAULT_SIG) and has_signature():
+        b = b[: -len(_DEFAULT_SIG)].rstrip() + "\n\n" + signature()
+    return b
+
+
+def send_email(pid: int, *, by: str = "you", gmail_mod=None) -> dict:
+    """APPROVE AND SEND one outreach email — only from your explicit action after reading it (the
+    dashboard's Approve & send, `helios prospects send`, or saying "approve" and clicking Approve at
+    the permission prompt). DRAFTED → APPROVED → sent from your Gmail → CONTACTED, with the Gmail
+    message id as the evidence. If the send fails it stays APPROVED (nothing claimed)."""
+    p = store.get(pid)
+    if not p:
+        raise store.StatusError("no such prospect")
+    d = p.get("draft") or {}
+    if d.get("channel", "email") != "email":
+        raise store.StatusError(f"{p['name']} has no public email — these are call notes for YOU to call "
+                                f"({d.get('to') or 'no number'}); approve them, then mark it contacted after the call")
+    if p["status"] not in ("DRAFTED", "APPROVED"):
+        raise store.StatusError(f"only a draft waiting for approval can be sent (this one is {p['status']})")
+    if not d.get("to") or not d.get("body"):
+        raise store.StatusError("nothing to send (no recipient or no text)")
+    if not has_signature():
+        raise store.StatusError("set your email sign-off first so the email doesn't end with a bare 'Best regards' — "
+                                "[prospecting] signature in settings.toml, e.g. \"Best regards,\\nYour Name\\nYour business\"")
+    g = gmail_mod
+    if g is None:
+        from .. import gmail as g
+    if not g.signed_in():
+        raise store.StatusError("Gmail isn't connected — run `helios gmail login`")
+    if p["status"] == "DRAFTED":
+        p = store.approve(pid, by=by)
+    body = _final_body(d["body"])
+    try:
+        res = g.send_outreach(d["to"], d["subject"], body)
+    except Exception as e:
+        raise store.StatusError(f"approved, but the email was NOT sent ({e}) — it's still waiting; try again") from None
+    if body != d["body"]:
+        store.update(pid, draft={**d, "body": body})
+    return store.record_contact(pid, channel="email (Gmail, sent by Helios on your approval)",
+                                evidence=f"Gmail sent message {res['id']}", by=by)
 
 
 def sync_sent(*, gmail_mod=None) -> list[dict]:

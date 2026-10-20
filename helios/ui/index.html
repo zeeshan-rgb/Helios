@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css?v=1.9.4" />
-  <link rel="stylesheet" href="/static/style.css?v=0.15.0" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=0.15.0" />
+  <link rel="stylesheet" href="/static/style.css?v=0.16.0" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=0.16.0" />
 </head>
 <body>
   <!-- Holographic open-animation overlay (cyan scan line + edge glow + CRT grid). Inert
@@ -348,7 +348,8 @@
   </div>
   <div id="sidescrim" class="sidescrim hidden"></div>
 
-  <!-- Outreach draft: view / edit (edits only while DRAFTED). Approving never sends anything. -->
+  <!-- Outreach draft: read it, edit it (while DRAFTED), then Approve & send — the only way an
+       email goes out from the dashboard is this explicit click + confirm. Phone leads: call notes. -->
   <div id="draftmodal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="dm_title">
     <div class="card wide">
       <h3 id="dm_title">Outreach draft</h3>
@@ -356,10 +357,13 @@
       <input id="dm_subject" class="dm_subject" aria-label="Subject" readonly>
       <textarea id="dm_body" class="dm_body" rows="12" aria-label="Message" readonly></textarea>
       <details class="prmore" id="dm_claims"><summary>Evidence for each claim</summary><div id="dm_claimlist"></div></details>
+      <div id="dm_note" class="dm_note hidden"></div>
       <div class="row">
         <button id="dm_close" class="ghost">Close</button>
         <button id="dm_edit" class="ghost">Edit</button>
         <button id="dm_save" class="primary hidden">Save draft</button>
+        <button id="dm_called" class="primary hidden" title="You called or visited them — marks it contacted">I called them</button>
+        <button id="dm_send" class="primary send hidden" title="Sends this email from your Gmail, then marks it contacted">Approve &amp; send</button>
       </div>
     </div>
   </div>
@@ -538,9 +542,9 @@
   {"imports": {"three": "/static/vendor/three170/three.module.min.js",
                "three/addons/": "/static/vendor/three170/addons/"}}
   </script>
-  <script src="/static/app.js?v=0.15.0"></script>
+  <script src="/static/app.js?v=0.16.0"></script>
   <script src="/static/vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="/static/dashboard.js?v=0.15.0"></script>
+  <script src="/static/dashboard.js?v=0.16.0"></script>
   <script type="module" src="/static/viewer.js?v=0.10.0"></script>
 </body>
 </html>

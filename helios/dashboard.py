@@ -477,7 +477,7 @@ def upcoming(limit: int = 8) -> list[dict]:
     n = _safe(lambda: len(store.list_prospects(status="DRAFTED", limit=500)), 0)
     if n:
         out.insert(0, {"at": "", "title": f"{n} outreach draft{'s' if n != 1 else ''} to approve",
-                       "kind": "approval", "detail": "Helios never sends — you approve, then send it yourself"})
+                       "kind": "approval", "detail": "Read each one, then Approve & send — nothing goes out without your click"})
     return out[:limit]
 
 
@@ -550,8 +550,8 @@ _SETUP = {
     "browser": "Helios's own hidden Edge/Chrome (fresh profile, never your logins). Forms, sending and "
                "buying need your approval; no passwords or card numbers, ever.",
     "memory": "Long-term memory lives in your Obsidian vault ([paths].vault).",
-    "gmail": "Run `helios gmail setup <client.json>` then `helios gmail login` in your own terminal. "
-             "Helios drafts replies to business contacts only and never sends without your approval.",
+    "gmail": "Outreach drafts for potential clients are listed below — open one, read it, then Approve & send. "
+             "Helios also drafts replies to your business contacts. Nothing is ever sent without your approval.",
     "polarion": "Run `helios polarion token local` (or server) in your own terminal. Access is read-only.",
     "mcp": "Internal tools run for every brain turn. The public server ([mcp_public]) lets other MCP "
            "clients use a curated, permission-gated tool set — see docs/HELIOS_MCP.md.",
@@ -582,6 +582,30 @@ def summary() -> dict:
             "engine": {"label": ENGINE_LABEL.get(conf.brain_engine(), conf.brain_engine()),
                        **{k: v for k, v in engine_health().items() if k != "models"}},
             "featured": featured(), "updated": _now()}
+
+
+# ------------------------------------------------------------------ outreach queue (drafts for potential clients)
+
+def outreach_queue() -> dict:
+    """Every outreach draft waiting for you (and approved-but-unsent ones), with what's needed to
+    send: Gmail connected + a real sign-off. Phone-only leads are call notes for you to use."""
+    from .prospecting import outreach, store
+    from . import gmail
+
+    def items():
+        out = []
+        for st in ("DRAFTED", "APPROVED"):
+            for p in store.list_prospects(status=st, limit=200):
+                d = p.get("draft") or {}
+                if not d.get("body"):
+                    continue
+                out.append({"id": p["id"], "name": p["name"], "status": p["status"], "priority": p.get("priority") or "",
+                            "channel": d.get("channel", "email"), "to": d.get("to", ""), "subject": d.get("subject", ""),
+                            "area": (p.get("area") or "").split(",")[0]})
+        out.sort(key=lambda x: ({"A": 0, "B": 1, "C": 2}.get(x["priority"], 3), x["channel"] != "email"))
+        return out
+    return {"items": _safe(items, []), "gmail": _safe(gmail.signed_in, False),
+            "signature": _safe(outreach.has_signature, False)}
 
 
 # ------------------------------------------------------------------ executive overview / reports

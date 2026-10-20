@@ -71,6 +71,14 @@ def _no_real_outbound(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(channels, "telegram_send_voice", lambda *a, **k: (False, "Telegram isn't configured (tests)"))
     monkeypatch.setattr(channels, "telegram_find_chat", lambda *a, **k: (_ for _ in ()).throw(ValueError("no network in tests")))
     monkeypatch.setattr(voice_note, "_speaker", lambda: (_ for _ in ()).throw(RuntimeError("no real TTS in tests")))
+    # Gmail: this PC has a real signed-in account, and outreach emails can now be SENT on approval —
+    # no test may ever reach Google. Tests that exercise Gmail install their own fake _api / _post.
+    from helios import gmail
+
+    def _no_gmail(*a, **k):
+        raise gmail.GmailError("network disabled in tests")
+    monkeypatch.setattr(gmail, "_api", _no_gmail)
+    monkeypatch.setattr(gmail, "_post", _no_gmail)
     monkeypatch.setattr(calling, "place", lambda *a, **k: {"ok": False, "sid": "", "status": "failed",
                                                            "detail": "network disabled in tests"})
     monkeypatch.setattr(calling, "fetch_status", lambda *a, **k: {"status": "", "error": "network disabled in tests"})

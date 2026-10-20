@@ -326,8 +326,9 @@ class Handler(BaseHTTPRequestHandler):
         self._raw_body = self._read_body()  # drain once; _json_body() parses this
         path = urlparse(self.path).path
         if path == "/prospects/action":
-            # The user's own click in the dashboard (token + origin checked above) — the only way
-            # besides the CLI / the permission prompt to approve. Approving sends NOTHING.
+            # The user's own click in the dashboard (token + origin checked above). "approve" only
+            # approves; "send" is Approve & send — the user read the draft and confirmed, so Helios
+            # sends that one email from their Gmail and records the Gmail message id as evidence.
             from .prospecting import engine as pros, store as pstore
             body = self._json_body()
             act = str(body.get("action") or "")
@@ -335,6 +336,18 @@ class Handler(BaseHTTPRequestHandler):
                 pid = int(body.get("id"))
                 if act == "approve":
                     p = pstore.approve(pid, by="you (dashboard)")
+                elif act == "send":
+                    from .prospecting import outreach as pout
+                    p = pout.send_email(pid, by="you (dashboard: Approve & send)")
+                elif act == "called":             # phone-only lead: YOU called/visited; your click is the evidence
+                    cur_p = pstore.get(pid)
+                    if not cur_p:
+                        raise pstore.StatusError("no such prospect")
+                    if cur_p["status"] == "DRAFTED":
+                        pstore.approve(pid, by="you (dashboard)")
+                    p = pstore.record_contact(pid, channel="phone/visit (by you)",
+                                              evidence=f"you confirmed the call in the dashboard at {pstore.now()}",
+                                              by="you (dashboard)")
                 elif act == "edit":
                     p = pstore.edit_draft(pid, subject=str(body.get("subject") or ""),
                                           body=str(body.get("body") or ""), by="you (dashboard)")
@@ -656,6 +669,8 @@ class Handler(BaseHTTPRequestHandler):
             data = {"items": dashboard.projects_view()}
         elif name == "report":
             data = {"text": dashboard.night_report()}
+        elif name == "outreach":
+            data = dashboard.outreach_queue()
         elif name == "exec":
             data = dashboard.executive_view(one("range") or "today", one("from"), one("to"), one("cat") or "all")
         elif name == "exec_report":

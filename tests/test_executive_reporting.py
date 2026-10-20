@@ -48,6 +48,9 @@ def ex(monkeypatch, tmp_path):
     monkeypatch.setattr(memory_store, "pending", lambda: [])
     monkeypatch.setattr(proposal, "folder", lambda: tmp_path / "Proposals")
     monkeypatch.setattr(geo.conf, "DATA_DIR", tmp_path)
+    # Calling defaults to OFF in tests, never the user's real settings.toml (the `phone`/`tg`
+    # fixtures override this). Without it, a test's result would depend on live on-disk config.
+    monkeypatch.setattr(calling, "cfg", lambda: dict(calling._DEFAULTS))
     store._inited.clear()
     return c
 

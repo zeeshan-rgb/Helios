@@ -495,6 +495,33 @@ def create_outreach_draft(to: str, subject: str, body: str) -> dict:
     return {"draft_id": d.get("id", ""), "to": to}
 
 
+_SYSTEM_ADDR = re.compile(r"^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)", re.I)
+
+
+def send_outreach(to: str, subject: str, body: str) -> dict:
+    """SEND one outreach email the user approved after reading it (the dashboard's Approve & send,
+    `helios prospects send`, or the brain's prospect_approve behind the Approve/Deny prompt — never
+    YOLO, never a background agent). Exactly one recipient, a real address, never a system mailbox.
+    Returns {"id": Gmail message id, "to"} — the id is the evidence the lead was contacted."""
+    to = parseaddr(to or "")[1]
+    if not _EMAIL_RE.match(to):
+        raise GmailError("invalid recipient address")
+    if _SYSTEM_ADDR.match(to):
+        raise GmailError(f"not sent: {to} is a system address")
+    me = profile().get("emailAddress", "")
+    msg = EmailMessage()
+    msg["To"] = to
+    if me:
+        msg["From"] = me
+    msg["Subject"] = (subject or "").strip()[:200]
+    msg.set_content(_clean_reply(body))
+    sent = _api("POST", "/messages/send", body={"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()})
+    if not sent.get("id"):
+        raise GmailError("Gmail didn't confirm the send")
+    conf.log("gmail", f"SENT outreach to {to} ({subject[:60]})")
+    return {"id": sent["id"], "to": to}
+
+
 def pending(include_all: bool = False) -> list[dict]:
     drafts = _load(_state_file(), {}).get("drafts") or []
     return drafts if include_all else [d for d in drafts if d.get("status") == "pending"]

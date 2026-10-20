@@ -690,7 +690,7 @@ def cmd_gmail(args) -> int:
     """Gmail: `helios gmail [status | setup <client.json> | login | logout | business [list | add
     <email|@domain> | remove <x>] | inbox [query...] | check | drafts | show <n> | send <n> |
     discard <n>]`. Helios drafts replies to business contacts only; nothing is sent without you."""
-    _conf()
+    conf = _conf()
     from helios import gmail, jobs
     args = list(args or [])
     action = args.pop(0).lower() if args else "status"
@@ -702,6 +702,12 @@ def cmd_gmail(args) -> int:
             print("OAuth client saved to config/secrets.toml [gmail]. You can delete the downloaded "
                   "file now.\nNext: helios gmail login")
         elif action == "login":
+            c = conf.provider_cfg("gmail")
+            if not (c.get("client_id") and c.get("client_secret")):
+                print("Not ready to sign in yet: no Google client saved. Download the 'Desktop app' client JSON "
+                      "from Google Cloud, then run: helios gmail setup <path-to-file.json>  "
+                      "(tip: type the command, then drag the file into this window).")
+                return 1
             print("Opening Google sign-in in your browser — sign in and allow access "
                   "(read, draft and send; never permanent delete)...")
             me = gmail.login(open_browser=None)
@@ -762,10 +768,10 @@ def cmd_gmail(args) -> int:
 
 def cmd_prospects(args) -> int:
     """Business prospecting: `helios prospects [list [STATUS|A|B|C] | show <id> | run [area] |
-    scan <area> | research <id> | audit <url> | proposal <id> | approve <id> | reject <id> |
+    scan <area> | research <id> | audit <url> | proposal <id> | approve <id> | send <id> | reject <id> |
     archive <id> | gmail <id> | sent <id> | status <id> REPLIED|INTERESTED|NOT_INTERESTED|CLOSED |
     sync | coverage]`. `list needs_pricing` shows quotes waiting for your rate card.
-    Helios researches and drafts; YOU approve and send."""
+    Helios researches and drafts; nothing is sent until YOU read it and confirm (`send <id>`)."""
     _conf()
     from helios.prospecting import engine, outreach, store
     args = list(args or [])
@@ -823,8 +829,21 @@ def cmd_prospects(args) -> int:
                 print("Not approved.")
                 return 0
             store.approve(p["id"], by="you (CLI)")
-            print("Approved. Next: `helios prospects gmail {0}` puts it in your Gmail drafts, or copy it and "
-                  "send it yourself — then `helios prospects sent {0}`.".format(p["id"]))
+            print("Approved. Next: `helios prospects send {0}` sends it from your Gmail, or "
+                  "`helios prospects gmail {0}` puts it in your Gmail drafts to send yourself.".format(p["id"]))
+        elif action == "send":
+            p = store.get(pid())
+            if not p:
+                raise store.StatusError("no such prospect")
+            d = p.get("draft") or {}
+            if d.get("channel", "email") != "email":
+                raise store.StatusError("that one is call notes (phone only) — call them yourself")
+            print(f"To: {d.get('to')}\nSubject: {d.get('subject')}\n\n{outreach._final_body(d.get('body', ''))}\n")
+            if input("Send this email from your Gmail now? Type send: ").strip().lower() != "send":
+                print("Not sent.")
+                return 0
+            p = outreach.send_email(p["id"], by="you (CLI)")
+            print(f"Sent. {p['name']} is now CONTACTED ({p['contact_log'][-1].get('evidence', '')}).")
         elif action in ("reject", "archive"):
             print(engine.format_prospect(store.set_status(pid(), action.upper() + "ED" if action == "reject" else "ARCHIVED")))
         elif action == "proposal":

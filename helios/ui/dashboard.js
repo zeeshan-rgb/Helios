@@ -255,13 +255,13 @@
   function renderMetrics() {
     const m = summary.metrics || {};
     const card = (ic, color, label, val, sub, tip) =>
-      `<div class="metric" style="--mc:${color}" title="${e(tip)}"><div class="ml">${MICONS[ic]}${e(label)}</div>` +
+      `<div class="metric${ic === "appr" ? " clickable" : ""}" style="--mc:${color}" title="${e(tip)}" data-m="${ic}"><div class="ml">${MICONS[ic]}${e(label)}</div>` +
       `<div class="mv">${e(val)}</div><div class="ms">${e(sub)}</div></div>`;
     g("metrics").innerHTML = [
       card("biz", "var(--neon)", "Businesses found", m.businesses ?? 0, m.businesses_week ? `+${m.businesses_week} this week` : "from OpenStreetMap",
            "Local businesses in the prospect database (rejected/archived excluded)"),
       card("qual", "var(--green)", "Qualified", m.qualified ?? 0, "clear gap + evidence", "Qualified or drafted prospects"),
-      card("appr", "var(--orange)", "To approve", m.to_approve ?? 0, "never sent automatically", "Drafted outreach waiting for your approval"),
+      card("appr", "var(--orange)", "To approve", m.to_approve ?? 0, "click to read & send", "Open the outreach drafts — read each one, then Approve & send"),
       card("cont", "var(--purple)", "Contacted", m.contacted ?? 0, `${m.approved ?? 0} approved, not sent yet`,
            "Marked contacted only with evidence of your send"),
       card("res", "#5ee7c4", "Research · 7 days", m.research_week ?? 0, `${m.leads_week ?? 0} freelance leads`, "Findings in your research library"),
@@ -599,8 +599,11 @@
       `<button data-act="edit" ${d.body && drafted ? "" : "disabled"} title="${drafted ? "Edit the text before approving" : "Only drafts waiting for approval can be edited"}">Edit</button>` +
       `<button data-act="reject" ${contacted || ["REJECTED", "ARCHIVED"].includes(p.status) ? "disabled" : ""}>Reject</button>` +
       `<button data-act="archive" ${p.status === "ARCHIVED" || contacted ? "disabled" : ""}>Archive</button>` +
-      `<button data-act="approve" class="approve" ${drafted && d.to ? "" : "disabled"} title="${drafted ? (d.to ? "Approve — sends nothing" : "No public business contact") : "Only drafts can be approved"}">Approve</button></div>` +
-      `<div class="safe">Approving sends nothing. You send it yourself (Gmail drafts via <code>helios prospects gmail ${p.id}</code>); it's marked contacted only with evidence.</div>` +
+      (d.channel === "phone"
+        ? `<button data-act="review" class="approve" ${(drafted || p.status === "APPROVED") && d.to ? "" : "disabled"} title="Call notes — you call them">Call notes</button></div>` +
+          `<div class="safe">No public email for this business, so these are notes for <b>you</b> to call ${e(d.to || "")}. After the call, open the notes and click <b>I called them</b>.</div>`
+        : `<button data-act="review" class="approve" ${(drafted || p.status === "APPROVED") && d.to ? "" : "disabled"} title="Read the email, then Approve & send from your Gmail">Review &amp; send</button></div>` +
+          `<div class="safe">Read the email first — <b>Approve &amp; send</b> sends it from your Gmail to ${e(d.to || "the business")} and marks it contacted. Nothing goes out without that click.</div>`) +
       ((p.history || []).length ? `<div class="safe">History: ${(p.history || []).slice(-3).map(h => `${e(h.event)} ${ago(h.at)}`).join(" · ")}</div>` : "") +
       `</section>`;
   }
@@ -608,7 +611,7 @@
     const a = ev.target.closest(".srclink"); if (a) { openUrl(a.dataset.url); return; }
     const b = ev.target.closest("button[data-act]"); if (!b || b.disabled || !cur) return;
     const act = b.dataset.act;
-    if (act === "view" || act === "edit") { openDraft(cur, act === "edit"); return; }
+    if (act === "view" || act === "edit" || act === "review") { openDraft(cur, act === "edit"); return; }
     if (act === "proposal") {
       b.disabled = true;
       try {
@@ -652,8 +655,70 @@
     g("dm_claimlist").innerHTML = claims.length ? `<ul>${claims.map(c => `<li><b>${e(c.text)}</b> ← ${e(c.evidence)}</li>`).join("")}</ul>` : `<div class="safe">No factual claims in this draft.</div>`;
     setDraftEdit(!!edit && p.status === "DRAFTED");
     g("dm_edit").classList.toggle("hidden", p.status !== "DRAFTED");
+    const open = ["DRAFTED", "APPROVED"].includes(p.status);
+    const isMail = d.channel !== "phone";
+    g("dm_send").classList.toggle("hidden", !(open && isMail && d.to));
+    g("dm_called").classList.toggle("hidden", !(open && !isMail));
+    g("dm_send").disabled = true; g("dm_note").classList.add("hidden");
     g("draftmodal").classList.remove("hidden");
+    if (open && isMail) {
+      getJSON("/dashboard/outreach").then(o => {
+        const why = !o.gmail ? "Gmail isn't connected — run <code>helios gmail login</code> first."
+          : !o.signature ? "Set your sign-off first so the email doesn't end with a bare “Best regards”: <code>[prospecting] signature</code> in settings.toml (e.g. your name and business)."
+          : "";
+        g("dm_note").innerHTML = why || `Clicking <b>Approve &amp; send</b> sends this exact text from your Gmail to <b>${e(d.to)}</b>.`;
+        g("dm_note").classList.toggle("warn", !!why); g("dm_note").classList.remove("hidden");
+        g("dm_send").disabled = !!why;
+      }).catch(() => { g("dm_send").disabled = false; });
+    }
   }
+  g("dm_send").addEventListener("click", async () => {
+    if (!cur) return;
+    if (!g("dm_body").readOnly) { toast("Save or cancel your edit first, then send.", "err"); return; }
+    const d = cur.draft || {};
+    if (!window.confirm(`Send this email now from your Gmail?\n\nTo: ${d.to}\nSubject: ${d.subject}\n\nIt goes out immediately and ${cur.name} is marked contacted.`)) return;
+    const b = g("dm_send"); b.disabled = true; b.textContent = "Sending…";
+    try {
+      await postJSON("/prospects/action", { id: cur.id, action: "send" });
+      toast(`Sent to ${d.to} — ${cur.name} marked contacted.`, "ok");
+      g("draftmodal").classList.add("hidden");
+      await selectProspect(cur.id, true); loadBusiness(); loadSummary(); loadUpcoming();
+    } catch (err) { toast("Not sent: " + err.message, "err"); b.disabled = false; }
+    b.textContent = "Approve & send";
+  });
+  g("dm_called").addEventListener("click", async () => {
+    if (!cur) return;
+    if (!window.confirm(`Confirm you called or visited ${cur.name}? It will be marked contacted.`)) return;
+    try {
+      await postJSON("/prospects/action", { id: cur.id, action: "called" });
+      toast(`${cur.name} marked contacted.`, "ok"); g("draftmodal").classList.add("hidden");
+      await selectProspect(cur.id, true); loadBusiness(); loadSummary(); loadUpcoming();
+    } catch (err) { toast("Couldn't record it: " + err.message, "err"); }
+  });
+
+  // Outreach drafts for potential clients — one list, opened from the "To approve" card and the
+  // Gmail drawer. Click a row to read it in full, then Approve & send (or use the call notes).
+  function outreachListHtml(o) {
+    const it = o.items || [];
+    if (!it.length) return `<div class="empty-note">No drafts waiting. New ones appear after prospecting runs.</div>`;
+    const mails = it.filter(x => x.channel !== "phone").length;
+    return `<div class="help">${mails} email${mails === 1 ? "" : "s"} to read &amp; send · ${it.length - mails} call note${it.length - mails === 1 ? "" : "s"} for you to call.` +
+      (!o.gmail ? " Gmail isn't connected yet." : !o.signature ? " Set your email sign-off before sending." : "") + `</div>` +
+      it.map(x => `<div class="oqrow" data-pid="${x.id}"><span class="pill p${e(x.priority)}">${e(x.priority || "?")}</span>` +
+        `<div class="oqm"><b>${e(x.name)}</b><span>${x.channel === "phone" ? "📞 call notes · " + e(x.to) : "✉ " + e(x.to)} · ${e(x.subject)}</span></div>` +
+        `<span class="oqs">${x.status === "APPROVED" ? "approved" : x.channel === "phone" ? "call" : "read & send"} ›</span></div>`).join("");
+  }
+  async function openOutreach() {
+    const el = infoPane("Outreach drafts — potential clients", `<div class="skel"></div><div class="skel"></div>`);
+    let o; try { o = await getJSON("/dashboard/outreach"); }
+    catch (err) { el.innerHTML = `<div class="infopane"><div class="empty-note">Couldn't load (${e(err.message)})</div></div>`; return; }
+    el.innerHTML = `<div class="infopane">${outreachListHtml(o)}</div>`;
+  }
+  document.addEventListener("click", async ev => {
+    const row = ev.target.closest(".oqrow"); if (!row) return;
+    await selectProspect(+row.dataset.pid); if (cur) openDraft(cur, false);
+  });
+  g("metrics").addEventListener("click", ev => { if (ev.target.closest('[data-m="appr"]')) openOutreach(); });
   function setDraftEdit(on) {
     g("dm_subject").readOnly = !on; g("dm_body").readOnly = !on;
     g("dm_save").classList.toggle("hidden", !on); g("dm_edit").textContent = on ? "Cancel edit" : "Edit";
@@ -686,6 +751,13 @@
     el.innerHTML = `<div class="infopane"><div class="kv"><span>Status</span><b class="${m.state === "ok" ? "ok" : m.state === "off" ? "na" : "bad"}">${e(stateTxt)}</b></div>` +
       `<div class="lines">${(m.lines || []).map(l => `<div>${e(l)}</div>`).join("")}</div>` +
       (m.help ? `<div class="help">${e(m.help)}</div>` : "") + (actions ? `<div class="row">${actions}</div>` : "") + `</div>`;
+    if (id === "gmail") {
+      const box = document.createElement("div");
+      box.innerHTML = `<h5>Outreach drafts for potential clients</h5><div class="skel"></div>`;
+      el.querySelector(".infopane").appendChild(box);
+      getJSON("/dashboard/outreach").then(o => { box.innerHTML = `<h5>Outreach drafts for potential clients</h5>` + outreachListHtml(o); })
+        .catch(err => { box.innerHTML = `<div class="empty-note">Couldn't load drafts (${e(err.message)})</div>`; });
+    }
     el.querySelectorAll("[data-x]").forEach(b => b.addEventListener("click", () => {
       const x = b.dataset.x;
       if (x === "mic") { micbtn.click(); setTimeout(() => openModule(id, label), 1200); }

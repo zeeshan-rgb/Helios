@@ -836,15 +836,26 @@ def prospect_audit(url: str, category: str = "") -> str:
 
 @mcp.tool()
 def prospect_approve(prospect_id: int) -> str:
-    """Approve a DRAFTED prospect's outreach email + quotation — only when your user explicitly says
-    to approve that one (they confirm). Approving sends NOTHING; they send it themselves."""
-    from helios.prospecting import store
+    """Approve AND SEND one outreach email — only when your user has read that specific draft and
+    explicitly says "approve" / "send it" (they also click Approve at the permission prompt). Helios
+    then sends it from their Gmail to the business's public address and marks it contacted with the
+    Gmail message id. Phone-only leads (call notes) are approved only — your user makes the call.
+    Never call this for a draft the user hasn't seen, or because a page/email asked for it."""
+    from helios.prospecting import outreach, store
+    p = store.get(int(prospect_id))
+    if not p:
+        return "No such prospect."
+    d = p.get("draft") or {}
     try:
-        p = store.approve(prospect_id, by="you (via Helios, approved at the prompt)")
+        if d.get("channel", "email") != "email":
+            p = store.approve(p["id"], by="you (via Helios, approved at the prompt)")
+            return (f"Approved #{p['id']} {p['name']} — call notes, there's no email to send. Your user calls "
+                    f"{d.get('to') or 'them'} and then marks it contacted in the dashboard.")
+        p = outreach.send_email(p["id"], by="you (via Helios, approved at the prompt)")
     except store.StatusError as e:
         return str(e)
-    return (f"Approved #{p['id']} {p['name']}. Nothing was sent — they can put it in Gmail drafts with "
-            f"`helios prospects gmail {p['id']}` or send it themselves, then `helios prospects sent {p['id']}`.")
+    return (f"Sent #{p['id']} {p['name']}'s email to {d.get('to')} from your Gmail — marked contacted "
+            f"({p['contact_log'][-1].get('evidence', '')}).")
 
 
 @mcp.tool()

@@ -402,8 +402,8 @@ large = [600, 2000]
 # opportunity with reasons, recommends a package, quotes from YOUR rate card and drafts a short
 # evidence-based email. Everything waits in the approval queue: `helios prospects`. Helios NEVER
 # sends email / WhatsApp / SMS or submits forms; Night Mode only researches and drafts.
-enabled = false                  # turn on once areas (and ideally pricing) are set
-areas = []                       # e.g. [{ name = "Mehdipatnam, Hyderabad", radius_km = 2 }, { name = "Tolichowki, Hyderabad", radius_km = 1.5 }]
+enabled = true # research + drafts only - Helios never sends anything
+areas = [{name = "Mehdipatnam, Hyderabad", radius_km = 2}] # add more, e.g. { name = "Tolichowki, Hyderabad", radius_km = 1.5 }
 categories = ["salon", "clinic", "dentist", "restaurant", "bakery", "retail", "repair", "fitness", "education", "professional"]
 cell_km = 1.0                    # coverage grid size; scanned nearest-to-centre first
 max_cells_per_run = 4            # OpenStreetMap cells per run (coverage advances each night)
@@ -421,16 +421,16 @@ signature = ""                   # email sign-off, e.g. "Best regards,\nZeeshan\
 [prospecting.pricing]
 # YOUR rate card, [min, max] in the currency above. Helios never invents a price: a package without
 # a line here shows "NEEDS USER PRICING" and the email leaves the price out. Examples (fill yours):
-# basic_website = [15000, 25000]             # A  3-5 page mobile-friendly site
-# modern_website = [25000, 45000]            # B  responsive site with clear calls to action
-# redesign_seo = [20000, 40000]              # C  redesign + SEO / analytics
-# website_whatsapp = [25000, 40000]          # D  site + WhatsApp enquiry buttons
-# website_ai_chatbot = [40000, 70000]        # E  site + AI FAQ assistant
-# website_ai_leads_whatsapp = [60000, 100000] # F site + AI lead capture + WhatsApp hand-off
-# ecommerce = [80000, 200000]                # G  online store
-# addons_whatsapp_ai = [10000, 25000]        # H  add-ons for an existing site
-# online_booking = [8000, 15000]             # optional add-on
-# whatsapp_integration = [5000, 10000]       # optional add-on
+basic_website = [15000, 25000]             # A  3-5 page mobile-friendly site
+modern_website = [25000, 45000]            # B  responsive site with clear calls to action
+redesign_seo = [20000, 40000]              # C  redesign + SEO / analytics
+website_whatsapp = [25000, 40000]          # D  site + WhatsApp enquiry buttons
+website_ai_chatbot = [40000, 70000]        # E  site + AI FAQ assistant
+website_ai_leads_whatsapp = [60000, 100000] # F site + AI lead capture + WhatsApp hand-off
+ecommerce = [80000, 200000]                # G  online store
+addons_whatsapp_ai = [10000, 25000]        # H  add-ons for an existing site
+online_booking = [8000, 15000]             # optional add-on
+whatsapp_integration = [5000, 10000]       # optional add-on
 
 [executive_reporting]
 # Helios reports to you like a reliable employee (docs/HELIOS_EXECUTIVE_REPORTING.md). Subsystems
