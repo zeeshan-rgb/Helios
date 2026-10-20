@@ -314,6 +314,21 @@ def format_prospect(p: dict, *, verbose: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _preview(d: dict) -> dict:
+    """Exactly what Approve & send would deliver: the final text (real sign-off + opt-out) and, with
+    a signature card, the rendered HTML email (image as a data: URI so the dashboard can show it)."""
+    if d.get("channel", "email") != "email" or not d.get("body"):
+        return {}
+    try:
+        from .. import email_signature
+        from . import outreach
+        final = outreach._final_body(d["body"])
+        return {"preview": final,
+                "preview_html": email_signature.email_html(final, preview=True) if email_signature.configured() else ""}
+    except Exception:  # pragma: no cover — a preview problem must never break the queue
+        return {}
+
+
 def card(p: dict) -> dict:
     """Compact view of one prospect for the dashboard's approval queue."""
     a = p.get("audit") or {}
@@ -334,7 +349,8 @@ def card(p: dict) -> dict:
             "reasons": [{"kind": k, **r} for k in ("website", "ai") for r in ((p.get("reasons") or {}).get(k) or [])],
             "priority_reason": (p.get("reasons") or {}).get("priority", ""),
             "draft": {"channel": d.get("channel", "email"), "to": d.get("to", ""), "to_source": d.get("to_source", ""),
-                      "subject": d.get("subject", ""), "body": d.get("body", ""), "claims": d.get("claims") or []},
+                      "subject": d.get("subject", ""), "body": d.get("body", ""), "claims": d.get("claims") or [],
+                      **_preview(d)},
             "history": p.get("contact_log") or []}
 
 

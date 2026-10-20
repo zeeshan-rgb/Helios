@@ -1149,6 +1149,75 @@ def cmd_telegram(args) -> int:
     return 0
 
 
+def cmd_signature(args) -> int:
+    """Your email signature for outreach: `helios signature [show | setup | image <file> | set <field>
+    <value> | clear]`. Fields: name, title, company, phone, email, linkedin, website, location,
+    style (light | dark). Stored in config/secrets.toml [signature] (private); images in data/signature/."""
+    conf = _conf()
+    from helios import email_signature as es
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "show"
+    if action == "show":
+        c = es.card()
+        if not es.configured():
+            print("No signature yet: helios signature setup")
+            return 1
+        print(es.text(c) + "\n\n— \n" + es.OPT_OUT)
+        print(f"\nPhoto/logo: {c['image'] or 'none (helios signature image <file>)'}")
+        prev = conf.DATA_DIR / "signature" / "preview.html"
+        prev.parent.mkdir(parents=True, exist_ok=True)
+        prev.write_text("<!doctype html><meta charset=utf-8><title>Signature preview</title>"
+                        "<body style='background:#fff;padding:24px'>"
+                        + es.email_html("Hi there,\n\nThis is how your outreach emails will end.\n\n" + es.text(c), preview=True),
+                        encoding="utf-8")
+        print(f"Preview: {prev}")
+    elif action == "setup":
+        c = es.card()
+        print("Your email signature (press Enter to keep the value in [brackets]).")
+        for k, label in (("name", "Full name"), ("title", "Title (e.g. Web & AI Developer)"),
+                         ("company", "Business name (optional)"), ("phone", "Mobile (e.g. +91 98765 43210)"),
+                         ("email", "Email to show (optional)"), ("linkedin", "LinkedIn profile URL"),
+                         ("website", "Website (optional, https://...)"), ("location", "City (optional, e.g. Hyderabad, India)"),
+                         ("style", "Look: light or dark")):
+            v = input(f"{label} [{c[k]}]: ").strip()
+            if v:
+                c[k] = v
+        bad = es.validate(c)
+        if bad:
+            print("Nothing saved - " + "; ".join(bad))
+            return 1
+        for k in es.TEXT_FIELDS + ("style",):
+            conf.set_secret("signature", k, c[k] or None)
+        print("Saved. Add a photo or logo with: helios signature image <file>   then: helios signature show")
+    elif action == "image" and args and args[0].lower() == "none":
+        conf.set_secret("signature", "image", None)
+        print("Image removed — the signature has no logo/photo now.")
+    elif action == "set" and len(args) >= 2 and args[0] in es.TEXT_FIELDS + ("style",):
+        c = {**es.card(), args[0]: " ".join(args[1:])}
+        bad = es.validate(c)
+        if bad:
+            print("Not saved - " + "; ".join(bad))
+            return 1
+        conf.set_secret("signature", args[0], c[args[0]])
+        print(f"{args[0]} saved.")
+    elif action == "image" and args:
+        try:
+            path = es.prepare_image(" ".join(args))
+        except (ValueError, OSError) as e:
+            print(f"Couldn't use that image: {e}")
+            return 1
+        conf.set_secret("signature", "image", path)
+        print(f"Image saved ({path}). Check it with: helios signature show")
+    elif action == "clear":
+        for k in es.FIELDS:
+            conf.set_secret("signature", k, None)
+        print("Signature cleared.")
+    else:
+        print(cmd_signature.__doc__.split(":", 1)[1].strip())
+        return 2
+    return 0
+
+
 def cmd_research(args) -> int:
     """Research: `helios research [topics | run [topic ...] | findings [topic] [--days N] |
     show <id> | keep <id>]`. `keep` copies one finding into memory (findings never go there
@@ -1213,6 +1282,7 @@ _COMMANDS = {
     "events": cmd_events,
     "calling": cmd_calling,
     "telegram": cmd_telegram,
+    "signature": cmd_signature,
 }
 
 _USAGE = ("Helios - usage: helios <command>\n"
@@ -1243,6 +1313,7 @@ _USAGE = ("Helios - usage: helios <command>\n"
           "  events        notification events (urgent / high / digest); ack when reviewed\n"
           "  calling       spoken briefings to YOU (Telegram voice or Twilio call): test / on / off / log / cancel\n"
           "  telegram      your own Helios bot: setup / test / status\n"
+          "  signature     your email signature for outreach: setup / image / show\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

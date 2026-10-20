@@ -55,6 +55,9 @@ _AI_PITCH = {
 
 
 def signature() -> str:
+    from .. import email_signature
+    if email_signature.configured():                 # the full card: name, role, mobile, LinkedIn
+        return email_signature.text()
     sig = str(quoting.cfg().get("signature") or "").strip()
     if not sig:
         g = conf.SETTINGS.get("gmail")
@@ -164,10 +167,14 @@ def has_signature() -> bool:
 
 
 def _final_body(body: str) -> str:
-    """Drafts built before you set a signature end in the bare default; swap in the real one."""
+    """What actually goes out: drafts built before you set a signature end in the bare default, so
+    the real one is swapped in; with a signature card, the polite opt-out line is added too."""
+    from .. import email_signature
     b = (body or "").rstrip()
     if b.endswith(_DEFAULT_SIG) and has_signature():
         b = b[: -len(_DEFAULT_SIG)].rstrip() + "\n\n" + signature()
+    if email_signature.configured() and email_signature.OPT_OUT not in b:
+        b += "\n\n— \n" + email_signature.OPT_OUT
     return b
 
 
@@ -198,8 +205,12 @@ def send_email(pid: int, *, by: str = "you", gmail_mod=None) -> dict:
     if p["status"] == "DRAFTED":
         p = store.approve(pid, by=by)
     body = _final_body(d["body"])
+    from .. import email_signature as esig
+    extra = {}
+    if esig.configured():                            # HTML card + inline photo/logo + your name as sender
+        extra = {"html": esig.email_html(body), "images": esig.inline_images(), "from_name": esig.card()["name"]}
     try:
-        res = g.send_outreach(d["to"], d["subject"], body)
+        res = g.send_outreach(d["to"], d["subject"], body, **extra)
     except Exception as e:
         raise store.StatusError(f"approved, but the email was NOT sent ({e}) — it's still waiting; try again") from None
     if body != d["body"]:

@@ -722,6 +722,13 @@
   function setDraftEdit(on) {
     g("dm_subject").readOnly = !on; g("dm_body").readOnly = !on;
     g("dm_save").classList.toggle("hidden", !on); g("dm_edit").textContent = on ? "Cancel edit" : "Edit";
+    // Reading: show exactly what would be sent (signature card + opt-out). Editing: the raw text.
+    const d = (cur && cur.draft) || {};
+    const showHtml = !on && !!d.preview_html;
+    g("dm_html").classList.toggle("hidden", !showHtml);
+    g("dm_body").classList.toggle("hidden", showHtml);
+    if (showHtml) g("dm_html").srcdoc = `<!doctype html><html><body style="margin:0;padding:16px;background:#fff">${d.preview_html}</body></html>`;
+    g("dm_body").value = on ? (d.body || "") : (d.preview || d.body || "");
     if (on) g("dm_body").focus();
   }
   g("dm_edit").addEventListener("click", () => {

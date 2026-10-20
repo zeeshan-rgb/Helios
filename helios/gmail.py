@@ -498,11 +498,16 @@ def create_outreach_draft(to: str, subject: str, body: str) -> dict:
 _SYSTEM_ADDR = re.compile(r"^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)", re.I)
 
 
-def send_outreach(to: str, subject: str, body: str) -> dict:
+def send_outreach(to: str, subject: str, body: str, *, html: str | None = None,
+                  image: tuple[bytes, str] | None = None, images: list | None = None,
+                  from_name: str = "") -> dict:
     """SEND one outreach email the user approved after reading it (the dashboard's Approve & send,
     `helios prospects send`, or the brain's prospect_approve behind the Approve/Deny prompt — never
     YOLO, never a background agent). Exactly one recipient, a real address, never a system mailbox.
-    Returns {"id": Gmail message id, "to"} — the id is the evidence the lead was contacted."""
+    Plain text always; with `html`, a multipart/alternative email whose signature photo/logo is
+    embedded inline (cid:helios-sig — no remote image, no tracking). Returns {"id", "to"} — the
+    Gmail message id is the evidence the lead was contacted."""
+    from email.utils import formataddr
     to = parseaddr(to or "")[1]
     if not _EMAIL_RE.match(to):
         raise GmailError("invalid recipient address")
@@ -512,9 +517,15 @@ def send_outreach(to: str, subject: str, body: str) -> dict:
     msg = EmailMessage()
     msg["To"] = to
     if me:
-        msg["From"] = me
+        msg["From"] = formataddr((from_name.strip(), me)) if from_name.strip() else me
     msg["Subject"] = (subject or "").strip()[:200]
     msg.set_content(_clean_reply(body))
+    if html:
+        msg.add_alternative(conf.SECRET_RE.sub("[removed]", html), subtype="html")
+        parts = list(images or []) + ([("helios-sig", image[0], image[1])] if image else [])
+        for cid, data, sub in parts:              # signature logo / icons / accent, embedded inline
+            msg.get_payload()[1].add_related(data, maintype="image", subtype=sub, cid=f"<{cid}>",
+                                             disposition="inline")
     sent = _api("POST", "/messages/send", body={"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()})
     if not sent.get("id"):
         raise GmailError("Gmail didn't confirm the send")

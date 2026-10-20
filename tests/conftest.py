@@ -79,6 +79,9 @@ def _no_real_outbound(tmp_path_factory, monkeypatch):
         raise gmail.GmailError("network disabled in tests")
     monkeypatch.setattr(gmail, "_api", _no_gmail)
     monkeypatch.setattr(gmail, "_post", _no_gmail)
+    # The real email signature (your phone / LinkedIn) is never read by tests; they set their own.
+    from helios import email_signature
+    monkeypatch.setattr(email_signature, "card", lambda: {k: "" for k in email_signature.FIELDS})
     monkeypatch.setattr(calling, "place", lambda *a, **k: {"ok": False, "sid": "", "status": "failed",
                                                            "detail": "network disabled in tests"})
     monkeypatch.setattr(calling, "fetch_status", lambda *a, **k: {"status": "", "error": "network disabled in tests"})

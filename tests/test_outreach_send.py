@@ -47,14 +47,15 @@ def drafted(channel="email", to="hello@glow.in", body="Hi Glow team,\n\nA quick 
 
 
 def fake_gmail(ok=True, signed=True):
-    sent = []
+    sent, extras = [], []
 
-    def send(to, subject, body):
+    def send(to, subject, body, **kw):
         if not ok:
             raise gmail.GmailError("quota exceeded")
         sent.append((to, subject, body))
+        extras.append(kw)
         return {"id": f"msg{len(sent)}", "to": to}
-    return SimpleNamespace(signed_in=lambda: signed, send_outreach=send, sent=sent)
+    return SimpleNamespace(signed_in=lambda: signed, send_outreach=send, sent=sent, extras=extras)
 
 
 # ------------------------------------------------------------------ the send flow
@@ -187,3 +188,134 @@ def test_outreach_queue_lists_drafts_and_readiness(pc, monkeypatch):
     assert {x["channel"] for x in q["items"]} == {"email", "phone"}
     pc["signature"] = ""
     assert dashboard.outreach_queue()["signature"] is False
+
+
+# ------------------------------------------------------------------ the signature card
+
+from helios import email_signature  # noqa: E402
+
+CARD = {"name": "Test User", "title": "Web & AI Developer", "company": "Helios Web Studio",
+        "phone": "+91 98765 43210", "email": "", "linkedin": "https://www.linkedin.com/in/test-user",
+        "website": "", "location": "", "image": "", "style": ""}
+
+
+@pytest.fixture
+def sig(monkeypatch, tmp_path):
+    c = dict(CARD)
+    monkeypatch.setattr(email_signature, "card", lambda: dict(c))
+    return c
+
+
+def test_signature_text_and_validation(sig):
+    t = email_signature.text()
+    assert t.startswith("Best regards,\nTest User\nWeb & AI Developer · Helios Web Studio")
+    assert "Mobile: +91 98765 43210" in t and "LinkedIn: https://www.linkedin.com/in/test-user" in t
+    assert email_signature.validate(CARD) == []
+    assert email_signature.validate({**CARD, "linkedin": "bit.ly/abc"})            # no shorteners / non-profile links
+    assert email_signature.validate({**CARD, "phone": "call me"})
+    assert email_signature.validate({**CARD, "name": ""})
+
+
+def test_card_replaces_bare_sign_off_and_adds_opt_out(pc, sig):
+    body = outreach._final_body("Hi Glow team,\n\nA quick idea.\n\nBest regards")
+    assert "Test User" in body and body.count("Best regards") == 1
+    assert body.rstrip().endswith(email_signature.OPT_OUT)
+    assert outreach._final_body(body) == body                                     # idempotent
+
+
+def test_send_uses_html_card_inline_image_and_real_sender_name(pc, sig, tmp_path, monkeypatch):
+    from PIL import Image
+    monkeypatch.setattr(email_signature.conf, "DATA_DIR", tmp_path)
+    src = tmp_path / "me.jpg"
+    Image.new("RGB", (400, 300), (30, 90, 200)).save(src)
+    sig["image"] = email_signature.prepare_image(str(src))
+    pid, gm = drafted(), fake_gmail()
+    outreach.send_email(pid, gmail_mod=gm)
+    kw = gm.extras[0]
+    assert kw["from_name"] == "Test User"
+    assert 'href="tel:+919876543210"' in kw["html"] and 'href="https://www.linkedin.com/in/test-user"' in kw["html"]
+    assert kw["images"][0][0] == "helios-sig" and kw["images"][0][2] == "png" and 'src="cid:helios-sig"' in kw["html"]
+    assert email_signature.OPT_OUT.replace('"', "&quot;").replace("'", "&#x27;") in kw["html"]
+    assert "<script" not in kw["html"] and "http://" not in kw["html"]
+
+
+def test_prepare_image_makes_a_small_square_png(tmp_path, monkeypatch):
+    from PIL import Image
+    monkeypatch.setattr(email_signature.conf, "DATA_DIR", tmp_path)
+    src = tmp_path / "logo.jpg"
+    Image.new("RGB", (1200, 800), (200, 40, 40)).save(src)
+    out = Path(email_signature.prepare_image(str(src)))
+    im = Image.open(out)
+    assert im.size == (160, 160) and out.suffix == ".png" and out.stat().st_size < 60_000
+    with pytest.raises(ValueError):
+        email_signature.prepare_image(str(tmp_path / "missing.png"))
+
+
+def test_gmail_builds_multipart_with_inline_image(monkeypatch, sig, tmp_path):
+    import base64
+    import email
+    from PIL import Image
+    monkeypatch.setattr(email_signature.conf, "DATA_DIR", tmp_path)
+    src = tmp_path / "me.png"
+    Image.new("RGB", (300, 300), (10, 120, 90)).save(src)
+    sig["image"] = email_signature.prepare_image(str(src))
+    raw = []
+    monkeypatch.setattr(gmail, "profile", lambda: {"emailAddress": "me@gmail.com"})
+    monkeypatch.setattr(gmail, "_api", lambda m, p, *a, **k: (raw.append(k["body"]["raw"]), {"id": "m1"})[1])
+    body = "Hi,\n\nIdea.\n\n" + email_signature.text()
+    gmail.send_outreach("hello@glow.in", "Idea", body, html=email_signature.email_html(body),
+                        image=email_signature.image_bytes(), from_name="Test User")
+    m = email.message_from_bytes(base64.urlsafe_b64decode(raw[0]))
+    assert m["From"] == "Test User <me@gmail.com>"
+    types = [p.get_content_type() for p in m.walk()]
+    assert "text/plain" in types and "text/html" in types and "image/png" in types
+    img = next(p for p in m.walk() if p.get_content_type() == "image/png")
+    assert img["Content-ID"] == "<helios-sig>" and img.get_content_disposition() == "inline"
+    html_part = next(p for p in m.walk() if p.get_content_type() == "text/html").get_payload(decode=True).decode()
+    assert 'src="cid:helios-sig"' in html_part
+
+
+def test_dashboard_preview_shows_exactly_what_is_sent(pc, sig):
+    from helios.prospecting import engine as eng
+    pid = drafted()
+    d = eng.card(store.get(pid))["draft"]
+    assert d["preview"].rstrip().endswith(email_signature.OPT_OUT) and "Test User" in d["preview"]
+    assert "Test User" in d["preview_html"] and "linkedin.com/in/test-user" in d["preview_html"]
+
+
+def test_dark_card_is_real_text_with_inline_icons_and_no_logo(sig, tmp_path, monkeypatch):
+    monkeypatch.setattr(email_signature.conf, "DATA_DIR", tmp_path)
+    sig.update(style="dark", email="me@gmail.com", location="Hyderabad, India", image="")
+    imgs = email_signature.inline_images()
+    cids = [c for c, _, _ in imgs]
+    assert "helios-sig" not in cids                                     # no logo when none is set
+    assert cids == ["sig-accent", "sig-i-phone", "sig-i-mail", "sig-i-in", "sig-i-pin"]
+    h = email_signature.html()
+    for c in cids:
+        assert f'src="cid:{c}"' in h
+    assert "Test User" in h and 'href="mailto:me@gmail.com"' in h and 'href="tel:+919876543210"' in h
+    assert "Hyderabad, India" in h and 'bgcolor="#0b1220"' in h
+    p = email_signature.html(preview=True)
+    assert "cid:" not in p and p.count("data:image/png;base64,") == len(cids)
+    t = email_signature.text()
+    assert "Email: me@gmail.com" in t and t.endswith("Hyderabad, India")
+
+
+def test_style_and_email_validation():
+    assert email_signature.validate({**CARD, "style": "neon"})
+    assert email_signature.validate({**CARD, "email": "not-an-email"})
+    assert email_signature.validate({**CARD, "style": "dark", "email": "me@gmail.com"}) == []
+
+
+def test_gmail_embeds_every_signature_image(monkeypatch):
+    import base64
+    import email
+    raw = []
+    monkeypatch.setattr(gmail, "profile", lambda: {"emailAddress": "me@gmail.com"})
+    monkeypatch.setattr(gmail, "_api", lambda m, p, *a, **k: (raw.append(k["body"]["raw"]), {"id": "m2"})[1])
+    imgs = [("sig-accent", b"\x89PNG-a", "png"), ("sig-i-phone", b"\x89PNG-b", "png")]
+    gmail.send_outreach("hello@glow.in", "Idea", "Body", html='<img src="cid:sig-accent"><img src="cid:sig-i-phone">',
+                        images=imgs, from_name="Syed")
+    m = email.message_from_bytes(base64.urlsafe_b64decode(raw[0]))
+    ids = sorted(p["Content-ID"] for p in m.walk() if p.get_content_maintype() == "image")
+    assert ids == ["<sig-accent>", "<sig-i-phone>"]
