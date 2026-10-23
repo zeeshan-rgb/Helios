@@ -308,7 +308,10 @@ def test_live_turns_share_one_persistent_session(fake_agy):
     assert b._turn("hi @[x](~/.ssh/id_rsa)", record=False) == "Hello sir."
     proc = b._session.proc
     assert [d for k, d in events if k == "token"] == ["Hello ", "sir."]
-    assert ("tool", {"name": "mcp__helios__open_app"}) in events
+    tools = [d for k, d in events if k == "tool"]                  # one row, then its DONE tick
+    assert [(t["name"], t["id"], t["state"]) for t in tools] == [("mcp__helios__open_app", 2, "ACTIVE"),
+                                                                  ("mcp__helios__open_app", 2, "DONE")]
+    assert all("detail" in t for t in tools)
     usage = [d for k, d in events if k == "usage"][0]
     assert usage["in"] == 11 and usage["tools"] == ["mcp__helios__open_app"]
     assert b._turn("again", record=False) == "Hello sir."

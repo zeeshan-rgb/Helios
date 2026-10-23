@@ -61,6 +61,11 @@ class MissionManager:
             final = (db.get_mission(mid) or {}).get("result") or result or "Done."
             notify.toast(f"Helios — mission #{mid} done", str(final)[:200])  # toast body capped at 200
             self.emit("status", f"✅ Mission #{mid} complete.")
+            try:                                    # "important task completion" SMS (batched)
+                from . import sms
+                sms.notify("task_complete", f"Mission #{mid} complete", dedupe_key=f"mission:{mid}")
+            except Exception:  # pragma: no cover
+                pass
             self.emit("mission", {"id": mid, "status": "done"})
 
     def panic(self) -> None:

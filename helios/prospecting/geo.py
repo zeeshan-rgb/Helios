@@ -168,10 +168,15 @@ def tag_filters(categories: list[str]) -> list[tuple[str, str, str]]:
     return out
 
 
+OVERPASS_TIMEOUT = 30          # seconds per instance (was 60 — a dead mirror cost a minute per cell)
+_DOWN_FOR = 600                # an instance that just failed goes to the back of the line for 10 min
+_down: dict[str, float] = {}
+
+
 def overpass_query(cell: str, categories: list[str], limit: int = 400) -> str:
     s, w, n, e = cell.split(",")
     lines = [f'  nwr["{k}"="{v}"]["name"]({s},{w},{n},{e});' for _cat, k, v in tag_filters(categories)]
-    return f"[out:json][timeout:60];\n(\n" + "\n".join(lines) + f"\n);\nout center tags {int(limit)};"
+    return f"[out:json][timeout:25];\n(\n" + "\n".join(lines) + f"\n);\nout center tags {int(limit)};"
 
 
 def overpass_endpoints() -> list[str]:
@@ -180,7 +185,15 @@ def overpass_endpoints() -> list[str]:
     v = (conf.SETTINGS.get("prospecting") or {}).get("overpass_endpoints") if isinstance(
         conf.SETTINGS.get("prospecting"), dict) else None
     return [str(u) for u in v if str(u).startswith("https://")] if isinstance(v, list) and v else \
-        [OVERPASS, "https://overpass.private.coffee/api/interpreter"]
+        [OVERPASS, "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter",
+         "https://maps.mail.ru/osm/tools/overpass/api/interpreter"]
+
+
+def _ordered_endpoints() -> list[str]:
+    """Healthy instances first; ones that failed in the last 10 minutes are tried last."""
+    now = time.time()
+    eps = overpass_endpoints()
+    return [u for u in eps if _down.get(u, 0) <= now] + [u for u in eps if _down.get(u, 0) > now]
 
 
 def _transient(e: Exception) -> bool:
@@ -194,15 +207,18 @@ def _overpass(q: str, *, fetch=None, sleep=time.sleep) -> dict:
     5xx) — a bad query fails at once. A short pause between tries keeps to fair use."""
     body = urllib.parse.urlencode({"data": q}).encode()
     last: Exception | None = None
-    for i, url in enumerate(overpass_endpoints()):
+    for i, url in enumerate(_ordered_endpoints()):
         if i:
             sleep(2.0)
         try:
-            return (fetch or _get_json)(url, data=body)
+            res = fetch(url, data=body) if fetch else _get_json(url, data=body, timeout=OVERPASS_TIMEOUT)
+            _down.pop(url, None)
+            return res
         except Exception as e:
             if not _transient(e):
                 raise
             last = e
+            _down[url] = time.time() + _DOWN_FOR
             conf.log("prospecting", f"Overpass {url} unavailable ({e}) — trying the next instance")
     raise last if last else RuntimeError("no Overpass endpoint configured")
 

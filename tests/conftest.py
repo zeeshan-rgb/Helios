@@ -58,6 +58,8 @@ def _no_real_web(monkeypatch):
     offline = lambda url, *a, **k: scraper.Page(requested_url=url, error="network disabled in tests")  # noqa: E731
     monkeypatch.setattr(scraper, "fetch_http", offline)
     monkeypatch.setattr(scraper, "fetch_rendered", offline)
+    from helios.prospecting import geo
+    monkeypatch.setattr(geo, "_down", {})                # Overpass "recently failed" memory is per test
 
 
 @pytest.fixture(autouse=True)
@@ -79,6 +81,11 @@ def _no_real_outbound(tmp_path_factory, monkeypatch):
         raise gmail.GmailError("network disabled in tests")
     monkeypatch.setattr(gmail, "_api", _no_gmail)
     monkeypatch.setattr(gmail, "_post", _no_gmail)
+    # SMS: no test may reach a real gateway / provider (your phone could actually send), and the real
+    # [sms] settings never decide a test's outcome. Tests that exercise SMS set cfg / a fake provider.
+    from helios import sms
+    monkeypatch.setattr(sms, "_http", lambda *a, **k: (0, {}, "network disabled in tests"))
+    monkeypatch.setattr(sms, "cfg", lambda: {**sms._DEFAULTS, "templates": {k: {} for k in sms.TEMPLATES}})
     # The real email signature (your phone / LinkedIn) is never read by tests; they set their own.
     from helios import email_signature
     monkeypatch.setattr(email_signature, "card", lambda: {k: "" for k in email_signature.FIELDS})

@@ -420,6 +420,17 @@ const ACT_LABELS = {
   scroll: ["computer", "Scrolling"], open_app: ["computer", "Opening an app"],
   task: ["helios", "Delegating to an agent"], todowrite: ["helios", "Planning"],
   toolsearch: ["helios", "Looking up a tool"],
+  // Antigravity (agy) built-in tools
+  read_file: ["file", "Reading a file"], view_file: ["file", "Reading a file"], view_file_outline: ["file", "Reading a file"],
+  view_code_item: ["file", "Reading code"], list_dir: ["file", "Listing a folder"], list_directory: ["file", "Listing a folder"],
+  find_by_name: ["file", "Finding files"], grep_search: ["file", "Searching files"], codebase_search: ["file", "Searching code"],
+  write_to_file: ["file", "Writing a file"], replace_file_content: ["file", "Editing a file"],
+  multi_replace_file_content: ["file", "Editing a file"], run_command: ["shell", "Running a command"],
+  command_status: ["shell", "Checking a command"], send_command_input: ["shell", "Answering a command"],
+  search_web: ["web", "Searching the web"], read_url_content: ["web", "Reading a web page"],
+  // Helios's own long-running tools
+  prospects_run: ["helios", "Starting a business search"], task_status: ["helios", "Checking a background task"],
+  run_project_checks: ["helios", "Starting project checks"],
 };
 function friendlyTool(name) {
   const raw = String(name || "a tool");
@@ -443,19 +454,48 @@ function ensureAct() {
   act = { el, rows, sum, t0: performance.now(), count: 0 };
   return act;
 }
-function actRow(name) {
+// One-line hint shown next to the label: the file name, the command, the URL host or the query.
+function actHint(detail) {
+  const first = String(detail || "").split("\n")[0].replace(/^[A-Za-z_]+:\s*/, "");
+  const file = first.match(/[^\\/]+$/);
+  const hint = /^(?:[A-Za-z]:)?[\\/]/.test(first) && file ? file[0] : first;
+  return hint.length > 60 ? hint.slice(0, 60) + "…" : hint;
+}
+// data: {name} (older engines) or {id, name, detail, state} — a DONE update ticks the existing row.
+function actRow(data) {
+  const info = (data && typeof data === "object") ? data : { name: data };
   const a = ensureAct();
+  if (info.id != null) {
+    const existing = a.rows.querySelector(`.arow[data-sid="${CSS.escape(String(info.id))}"]`);
+    if (existing) {
+      if (info.detail && !existing.dataset.detail) setRowDetail(existing, info.detail);
+      if (String(info.state).toUpperCase() === "DONE") { existing.classList.add("ok"); existing.classList.remove("live"); }
+      return;
+    }
+  }
   const prev = a.rows.lastElementChild; if (prev) prev.classList.remove("live");
-  const [ico, label] = friendlyTool(name);
+  const [ico, label] = friendlyTool(info.name);
   const secs = (performance.now() - a.t0) / 1000;
   const row = document.createElement("div");
   row.className = "arow live";
-  row.innerHTML = `<span class="aico">${ACT_ICONS[ico] || ACT_ICONS.spark}</span>` +
-    `<span class="alab">${esc(label)}</span>` +
-    `<span class="atime">${secs < 1 ? "" : secs.toFixed(0) + "s"}</span>`;
+  if (info.id != null) row.dataset.sid = String(info.id);
+  row.innerHTML = `<div class="ahead"><span class="aico">${ACT_ICONS[ico] || ACT_ICONS.spark}</span>` +
+    `<span class="alab">${esc(label)}<span class="ahint"></span></span>` +
+    `<span class="atime">${secs < 1 ? "" : secs.toFixed(0) + "s"}</span><span class="acaret"></span></div>` +
+    `<pre class="adetail"></pre>`;
+  if (info.detail) setRowDetail(row, info.detail);
+  if (String(info.state).toUpperCase() === "DONE") row.classList.add("ok");
+  row.querySelector(".ahead").addEventListener("click", () => { if (row.dataset.detail) row.classList.toggle("expanded"); });
   a.rows.appendChild(row);
   a.count++;
   if (atBottom()) scroll();
+}
+function setRowDetail(row, detail) {
+  row.dataset.detail = "1";
+  row.classList.add("has-detail");
+  row.querySelector(".ahint").textContent = " · " + actHint(detail);
+  row.querySelector(".adetail").textContent = String(detail);
+  row.title = "Click to see details";
 }
 function finishAct() {
   if (!act) return;
@@ -497,7 +537,7 @@ ev.onmessage = (e) => {
     current.innerHTML = render(current.dataset.raw);
     if (atBottom()) scroll();
   } else if (kind === "tool") {
-    actRow(data && data.name);
+    actRow(data);
     setBusy(true, "Working…");
     if (!voiceActive) setUiState("acting");
   } else if (kind === "status") {

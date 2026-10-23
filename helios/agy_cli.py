@@ -359,7 +359,41 @@ def display_tool_name(step: dict) -> str:
     return name
 
 
-def consume_turn(session: AgySession, *, on_token=None, on_tool=None) -> dict:
+# What each tool step was doing, for the chat's expandable activity rows ("Reading a file" →
+# the path; "Running a command" → the command line). agy's built-in tools use PascalCase params.
+_DETAIL_KEYS = ("CommandLine", "command", "Command", "AbsolutePath", "FilePath", "file_path", "path", "Path",
+                "TargetFile", "DirectoryPath", "SearchDirectory", "SearchPath", "Url", "url", "Query", "query",
+                "Pattern", "pattern", "Cwd")
+
+
+def _short(v, n: int = 300) -> str:
+    s = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def tool_detail(step: dict) -> str:
+    """A short, secret-scrubbed description of a tool step's input (never its full output)."""
+    info = step.get("tool_info") or {}
+    p = info.get("parameters") or {}
+    if not isinstance(p, dict):
+        return ""
+    name = str(step.get("tool_name") or info.get("name") or "")
+    if name == "call_mcp_tool":
+        args = p.get("Arguments") or p.get("arguments") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {"input": args}
+        lines = [f"{k}: {_short(v, 200)}" for k, v in (args.items() if isinstance(args, dict) else []) if v not in ("", None)]
+    else:
+        lines = [f"{k}: {_short(p[k])}" for k in _DETAIL_KEYS if p.get(k) not in (None, "")]
+        if not lines:
+            lines = [f"{k}: {_short(v, 160)}" for k, v in list(p.items())[:5] if v not in (None, "")]
+    return conf.SECRET_RE.sub("[redacted]", "\n".join(lines))[:800]
+
+
+def consume_turn(session: AgySession, *, on_token=None, on_tool=None, on_tool_info=None) -> dict:
     """Read one turn's events (through its `result`). Enforces the gate proof (marker must exist
     at the first model step) and hooks.json integrity after every tool step. Returns
     {text, conversation_id, status, usage, tools, errors, gate_failure}."""
@@ -387,12 +421,16 @@ def consume_turn(session: AgySession, *, on_token=None, on_tool=None) -> dict:
                     on_token(s["text_delta"])
             elif stype == "tool":
                 key = (s.get("step_index"), s.get("tool_name"))
-                if key not in seen_tools:
+                first = key not in seen_tools
+                if first:
                     seen_tools.add(key)
                     name = display_tool_name(s)
                     out["tools"].append(name)
                     if on_tool:
                         on_tool(name)
+                if on_tool_info and (first or s.get("state") == "DONE"):
+                    on_tool_info({"id": s.get("step_index"), "name": display_tool_name(s),
+                                  "detail": tool_detail(s), "state": str(s.get("state") or "")})
                 if s.get("state") == "DONE" and not hooks_intact(session.handle):
                     out["gate_failure"] = "tampered"
                     session.close()

@@ -271,6 +271,12 @@ def route(now: datetime | None = None, publish=None) -> dict:
         delivery = _deliver(text, f"Helios · {sev.title()}", chans, publish)
         _set(ev["id"], state="delivered", delivery={**ev["delivery"], **delivery})
         done["delivered"] += 1
+        try:                                   # SMS: recipients who want this category; owner fallback
+            from . import sms                  # when no remote channel (Telegram) reached them
+            remote_ok = (delivery.get("telegram") or {}).get("status") == "delivered"
+            sms.notify_event(ev, other_channels_failed=not remote_ok)
+        except Exception as e:  # pragma: no cover
+            conf.log("executive", f"sms routing failed: {e}")
         from . import calling
         if calling.wants_call_for(ev):
             res = calling.schedule(reason=ev["summary"], event_id=ev["id"], critical=sev == "CRITICAL")
@@ -722,6 +728,16 @@ def deliver_report(kind: str, now: datetime | None = None, publish=None, *, buil
         cx.execute("UPDATE exec_reports SET delivery=? WHERE id=?", (json.dumps(delivery), saved["id"]))
     from . import calling
     call = calling.schedule(reason=_TITLES[kind], report_kind=kind) if calling.wants_call_for_report(kind) else None
+    try:                                       # short SMS notice, counts taken from the report's own sections
+        from . import sms
+        sec = rep["sections"]
+        if kind == "night":
+            sms.notify("night_mode", f"{len(sec['completed'])} completed, {len(sec['failed'])} failed, "
+                                     f"{len(sec['skipped'])} skipped", dedupe_key=f"report:night:{rep['until'][:10]}")
+        else:
+            sms.notify("reports", _TITLES[kind].lower(), dedupe_key=f"report:{kind}:{rep['until'][:13]}")
+    except Exception as e:  # pragma: no cover
+        conf.log("executive", f"sms report notice failed: {e}")
     return {"status": "delivered", "report": rep, "saved": saved, "delivery": delivery, "call": call}
 
 
@@ -769,6 +785,11 @@ def tick(now: datetime | None = None, publish=None) -> list[str]:
         calling.tick(now, publish)
     except Exception as e:  # pragma: no cover
         conf.log("executive", f"calling tick failed: {e}")
+    try:
+        from . import sms
+        sms.tick(now)
+    except Exception as e:  # pragma: no cover
+        conf.log("executive", f"sms tick failed: {e}")
     return done
 
 

@@ -853,6 +853,62 @@
       catch (err) { toast(err.message, "err"); b.disabled = false; }
     }));
   }
+  // SMS: provider + masked credentials, recipients (consent / opt-out / categories), limits, history,
+  // failures, test message and on/off — everything from /dashboard/sms, nothing estimated.
+  async function openSms() {
+    setNav("sms");
+    const el = infoPane("SMS", `<div class="skel"></div><div class="skel"></div>`);
+    let d; try { d = await getJSON("/dashboard/sms"); }
+    catch (err) { el.innerHTML = `<div class="infopane"><div class="empty-note">Couldn't load (${e(err.message)})</div></div>`; return; }
+    const st = d.status || {}, cats = d.categories || {};
+    const stateCls = s => ({ DELIVERED: "ok", FAILED: "bad", SUPPRESSED: "na", CANCELLED: "na" })[s] || "";
+    el.innerHTML = `<div class="infopane">` +
+      `<div class="kv"><span>Status</span><b class="${st.ready ? "ok" : "bad"}">${st.ready ? "Ready" : st.enabled ? "On, but not ready" : "Off"}</b></div>` +
+      `<div class="kv"><span>Provider</span><b>${e(st.provider || "-")} · ${st.provider_ready ? "configured" : "not configured"}</b></div>` +
+      Object.entries(st.credentials || {}).map(([k, v]) => `<div class="kv"><span>${e(k)}</span><b class="${v === "missing" ? "na" : ""}">${e(v)}</b></div>`).join("") +
+      (st.reasons || []).map(r => `<div class="safe">${e(r)}</div>`).join("") +
+      `<div class="row"><button class="${st.enabled ? "ghost" : "primary"}" id="sms_toggle">${st.enabled ? "Emergency stop (turn SMS off)" : "Turn SMS on"}</button>` +
+      `<button class="ghost" id="sms_test">Send me a test SMS</button></div>` +
+      `<h5>Recipients</h5>` + ((d.recipients || []).length ? d.recipients.map(r =>
+        `<div class="smsr" data-rid="${r.id}"><div class="smsm"><b>${e(r.name)}</b> <span class="muted small">${e(r.phone)}</span>` +
+        `<div class="muted small">${r.is_owner ? "You" : "consent: " + e(r.consent)}${r.opted_out ? " · <b class='bad'>OPTED OUT</b>" : ""}` +
+        `${r.enabled ? "" : " · disabled"}${!r.is_owner && r.require_approval ? " · each message needs your approval" : ""}</div>` +
+        `<div class="smscats">${Object.keys(cats).filter(k => k !== "test" && k !== "message").map(k =>
+          `<label title="${e(cats[k])}"><input type="checkbox" data-cat="${k}" ${r.categories.includes(k) ? "checked" : ""} ${r.opted_out ? "disabled" : ""}> ${e(k.replace(/_/g, " "))}</label>`).join("")}</div></div>` +
+        `<div class="smsb"><button class="ghost sm" data-act="${r.opted_out ? "opt_in" : "opt_out"}">${r.opted_out ? "Opt back in" : "Opt out"}</button>` +
+        `<button class="ghost sm" data-act="${r.enabled ? "disable_recipient" : "enable_recipient"}">${r.enabled ? "Disable" : "Enable"}</button></div></div>`).join("")
+        : `<div class="empty-note">No recipients yet. Add your number with <code>helios sms me +91…</code> and others with <code>helios sms add</code> (their consent is recorded).</div>`) +
+      `<h5>Limits</h5>` + Object.entries(d.limits || {}).map(([k, v]) => `<div class="kv"><span>${e(k.replace(/_/g, " "))}</span><b>${e(String(v))}</b></div>`).join("") +
+      `<h5>Delivery history</h5>` + ((d.messages || []).length ? d.messages.map(m =>
+        `<div class="exev"><span class="sev ${stateCls(m.status) === "ok" ? "NORMAL" : stateCls(m.status) === "bad" ? "CRITICAL" : "LOW"}">${e(m.status)}</span>` +
+        `<div class="what">${e(m.body)}<div class="meta">#${m.id} · ${e(m.recipient)} ${e(m.to_masked || "")} · ${e(m.category)} · ${ago(m.created)}` +
+        `${m.detail ? " · " + e(m.detail) : ""}</div></div>` +
+        (m.status === "APPROVAL_REQUIRED" ? `<button class="primary sm" data-approve="${m.id}">Approve</button>` : "") +
+        (["QUEUED", "APPROVAL_REQUIRED", "RETRY_SCHEDULED"].includes(m.status) ? `<button class="ghost sm" data-cancel="${m.id}">Cancel</button>` : "") +
+        `</div>`).join("") : `<div class="empty-note">No SMS sent yet.</div>`) +
+      `<div class="help">Only DELIVERED means the provider confirmed it reached the phone. "Sent to provider" means accepted, not yet confirmed.</div></div>`;
+    const act = async (body, msg) => { try { const r = await postJSON("/sms/action", body); if (msg) toast(typeof msg === "function" ? msg(r) : msg, "ok"); openSms(); } catch (err) { toast(err.message, "err"); } };
+    el.querySelector("#sms_toggle").addEventListener("click", () => {
+      if (st.enabled) { if (window.confirm("Turn SMS off now? Everything pending is cancelled.")) act({ action: "off" }, "SMS turned off"); }
+      else act({ action: "on" }, "SMS turned on");
+    });
+    el.querySelector("#sms_test").addEventListener("click", () => {
+      if (window.confirm("Send ONE real test SMS to your own number now?")) act({ action: "test" }, r => `Test SMS: ${r.status}${r.detail ? " — " + r.detail : ""}`);
+    });
+    el.querySelectorAll(".smsr").forEach(row => {
+      const rid = +row.dataset.rid;
+      row.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
+        if (b.dataset.act === "opt_in" && !window.confirm("Only opt someone back in if THEY asked for it. Continue?")) return;
+        act({ action: b.dataset.act, recipient: rid });
+      }));
+      row.querySelectorAll("[data-cat]").forEach(cb => cb.addEventListener("change", () => {
+        const sel = [...row.querySelectorAll("[data-cat]")].filter(x => x.checked).map(x => x.dataset.cat);
+        act({ action: "categories", recipient: rid, categories: sel });
+      }));
+    });
+    el.querySelectorAll("[data-approve]").forEach(b => b.addEventListener("click", () => act({ action: "approve", id: +b.dataset.approve }, "Approved — it goes out shortly")));
+    el.querySelectorAll("[data-cancel]").forEach(b => b.addEventListener("click", () => act({ action: "cancel", id: +b.dataset.cancel }, "Cancelled")));
+  }
   async function openInsights() {
     const el = infoPane("AI insights", `<div class="skel"></div>`);
     if (!limitsData) await loadLimits(false);
@@ -879,6 +935,7 @@
     else if (id === "leads") { setNav("leads"); g("prospectbtn").click(); }
     else if (id === "projects") openProjects();
     else if (id === "reports") openExec();
+    else if (id === "sms") openSms();
     else if (id === "settings") { setNav("settings"); g("setbtn").click(); }
     else openModule(id, label);
   }));

@@ -59,9 +59,19 @@ def test_sending_never_happens_on_its_own(gate, yolo, monkeypatch, tool, args):
 def test_there_is_no_tool_that_messages_prospects_or_leads():
     src = (_ROOT / "mcp" / "helios_server.py").read_text(encoding="utf-8")
     names = set(re.findall(r"^def (\w+)\(", src, re.M))
-    assert not [n for n in names if re.search(r"(whatsapp|sms|send_(email|message|pitch)|contact_(lead|prospect))", n)]
+    assert not [n for n in names if re.search(r"(whatsapp|send_(email|message|pitch)|contact_(lead|prospect))", n)]
+    # SMS exists (owner + people the owner added with consent) — but no SMS tool can take a phone
+    # number, sending is always the owner's Approve/Deny (never YOLO, never a background agent), and a
+    # lead/prospect number can never become a recipient (tests/test_sms.py::test_business_leads_*).
+    sms_tools = {n for n in names if "sms" in n}
+    assert sms_tools == {"send_sms", "sms_status", "sms_log", "sms_off"}
+    for n in sms_tools:
+        sig = re.search(rf"^def {n}\(([^)]*)\)", src, re.M).group(1)
+        assert not re.search(r"\b(to|number|phone|phone_number|recipient_number)\b\s*:", sig), n
+    assert permissions.classify("mcp__helios__send_sms", {}) == "ask"
+    assert permissions.is_outbound_send("mcp__helios__send_sms") and permissions.never_yolo("mcp__helios__send_sms", {})
     public = (_ROOT / "mcp" / "helios_public_server.py").read_text(encoding="utf-8")
-    assert "gmail" not in public and "send_draft" not in public
+    assert "gmail" not in public and "send_draft" not in public and "sms" not in public.lower()
 
 
 # ------------------------------------------------------------------ K2: access an API key → BLOCKED

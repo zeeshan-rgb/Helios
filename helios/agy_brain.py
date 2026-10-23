@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
 
 from . import agents, agy_cli, conf, db, memory, router
 from .brain import Brain
@@ -22,6 +23,19 @@ class AntigravityBrain(Brain):
         super().__init__(emit, perms)
         self._session: agy_cli.AgySession | None = None
         self._session_key: str | None = None
+        self._last_in = 0          # input tokens of the last live turn (the conversation's size)
+
+    def _recap(self, sid: str, n: int = 8) -> str:
+        """The last few exchanges, short, to carry into a fresh session when a conversation got big."""
+        try:
+            msgs = db.conversation_messages(sid)[-n:]
+        except Exception:
+            msgs = []
+        if not msgs:
+            return ""
+        lines = [f"{'User' if m['role'] == 'user' else 'Helios'}: {str(m['content'])[:500]}" for m in msgs]
+        return ("[Context carried over — the last messages of this conversation before a context refresh; "
+                "continue naturally, don't mention the refresh unless asked]\n" + "\n".join(lines) + "\n\n---\n\n")
 
     # ------------------------------------------------------------------ context
     def _rules(self) -> str:
@@ -84,10 +98,12 @@ class AntigravityBrain(Brain):
 
     def new_conversation(self) -> None:
         self._close_session()
+        self._last_in = 0
         super().new_conversation()
 
     def set_session(self, sid: str | None) -> None:
         self._close_session()
+        self._last_in = 0
         super().set_session(sid)
 
     def panic(self) -> None:
@@ -114,10 +130,23 @@ class AntigravityBrain(Brain):
         prompt = self._with_memory(prompt)
 
         resume = self.session_id if interactive else (session_hold or {}).get("id")
+        # A long conversation re-sends its whole history every turn (we measured 250-300k input tokens
+        # per reply), which makes every answer slow. Past the threshold, continue in a fresh session
+        # that carries a short recap instead.
+        rotate_at = int(agy_cli.cfg().get("rotate_context_tokens", 120000) or 0)
+        if interactive and resume and rotate_at and self._last_in >= rotate_at and not _retry:
+            conf.log("brain", f"context {self._last_in} tokens >= {rotate_at}: fresh session with a recap")
+            self.emit("status", "Long conversation — refreshing my context (with a recap) to keep replies fast.")
+            prompt = self._recap(resume) + prompt
+            self._close_session()
+            self.session_id, resume, self._last_in = None, None, 0
         timeout = int(conf.SETTINGS.get("claude", {}).get("turn_timeout", 600))
         conf.log("brain", f"agy turn interactive={interactive} resume={resume}")
         on_token = lambda t: self.emit("token", t)
         on_tool = lambda n: self.emit("tool", {"name": n})
+        # Live chat: each tool step with WHAT it's doing (path / command / query), and again when done,
+        # so the activity row can expand to show it and tick when finished.
+        on_tool_info = lambda d: self.emit("tool", d)      # noqa: E731
 
         if interactive:
             try:
@@ -132,10 +161,11 @@ class AntigravityBrain(Brain):
                 self.proc = session.proc       # panic / steering / watchdog kill this session
             watchdog = threading.Timer(timeout, self._close_session)
             watchdog.start()
+            t_start = time.monotonic()
             try:
                 session.reset_marker()
                 session.send(prompt)
-                res = agy_cli.consume_turn(session, on_token=on_token, on_tool=on_tool)
+                res = agy_cli.consume_turn(session, on_token=on_token, on_tool_info=on_tool_info)
             except (BrokenPipeError, OSError, ValueError) as e:
                 res = {"text": "", "errors": [f"session error: {e}"], "gate_failure": None,
                        "conversation_id": session.conversation_id, "status": None,
@@ -145,9 +175,12 @@ class AntigravityBrain(Brain):
             stderr = session.stderr_text() if not session.alive() else ""
             if res.get("gate_failure") or not session.alive():
                 self._close_session()
-            # A stale --conversation id: the session dies before answering. Start fresh once.
+            # A stale --conversation id: the session dies within seconds, before doing anything.
+            # Start fresh once. NEVER after a turn that ran tools or hit the watchdog — that would
+            # silently repeat the whole request (it once ran a 10-minute business search twice).
+            quick_death = (time.monotonic() - t_start) < 45 and not res.get("tools")
             if resume and not _retry and not res["text"] and not res.get("gate_failure") \
-                    and not self._aborted and res.get("status") is None:
+                    and not self._aborted and res.get("status") is None and quick_death:
                 conf.log("brain", "agy: resume failed; retrying with a fresh conversation")
                 self.session_id = None
                 with self._proc_lock:
@@ -155,6 +188,10 @@ class AntigravityBrain(Brain):
                 return self._turn(message, record, _retry=True, interactive=interactive,
                                   perm_sink=perm_sink, session_hold=session_hold)
             self.session_id = res.get("conversation_id") or self.session_id
+            if not res["text"] and (time.monotonic() - t_start) >= timeout - 2:
+                res.setdefault("errors", []).append(
+                    f"That took longer than {timeout // 60} minutes, so I stopped it, sir. Long jobs like a "
+                    "business search now run in the background — ask again and I'll start it that way.")
         else:
             def register(p):
                 with self._proc_lock:
@@ -191,6 +228,7 @@ class AntigravityBrain(Brain):
             from . import usage
             u = res.get("usage") or {}
             usage.record("chat", u.get("in"), u.get("out"))
+            self._last_in = int(u.get("in") or 0)
         self.emit("done", {"text": final_text})
 
         if self._aborted:

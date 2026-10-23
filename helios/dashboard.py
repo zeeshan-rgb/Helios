@@ -584,6 +584,59 @@ def summary() -> dict:
             "featured": featured(), "updated": _now()}
 
 
+# ------------------------------------------------------------------ SMS settings / history
+
+def sms_view() -> dict:
+    """The SMS section: provider + masked credential status, recipients (masked numbers), consent and
+    opt-outs, categories, limits, delivery history and failures. Nothing invented: no balance or
+    delivery the provider didn't report."""
+    from . import sms
+    c = _safe(sms.cfg, {})
+    rec = [{**{k: r[k] for k in ("id", "name", "purpose", "is_owner", "consent", "categories", "opted_out", "enabled",
+                                  "require_approval", "quiet_start", "quiet_end")}, "phone": sms.mask(r["phone"])}
+           for r in _safe(sms.recipients, [])]
+    msgs = _safe(lambda: sms.messages(60), [])
+    return {"status": _safe(sms.status, {}), "recipients": rec, "categories": sms.CATEGORIES,
+            "limits": {k: c.get(k) for k in ("max_per_day", "max_per_hour_total", "min_gap_minutes", "quiet_hours_start",
+                                               "quiet_hours_end", "critical_in_quiet_hours", "max_attempts", "fallback")},
+            "messages": [{k: m[k] for k in ("id", "created", "status", "recipient", "to_masked", "category", "body", "detail",
+                                            "attempts")} for m in msgs],
+            "pending_approval": [m["id"] for m in msgs if m["status"] == "APPROVAL_REQUIRED"]}
+
+
+def sms_action(body: dict) -> dict:
+    """Your clicks in the SMS section. Turning SMS ON / the test message happen only here or in the CLI."""
+    from . import sms
+    act = str(body.get("action") or "")
+    rid = body.get("recipient")
+    if act == "approve":
+        return {"ok": True, "message": sms.approve(int(body.get("id")))}
+    if act == "cancel":
+        return {"ok": True, "count": sms.cancel(int(body["id"]) if body.get("id") else None)}
+    if act in ("opt_out", "opt_in"):
+        r = (sms.opt_out if act == "opt_out" else sms.opt_in)(rid)
+        return {"ok": True, "opted_out": r["opted_out"]}
+    if act in ("enable_recipient", "disable_recipient"):
+        return {"ok": True, "enabled": sms.update_recipient(rid, enabled=act == "enable_recipient")["enabled"]}
+    if act == "categories":
+        return {"ok": True, "categories": sms.update_recipient(rid, categories=list(body.get("categories") or []))["categories"]}
+    if act == "off":
+        return {"ok": True, "cancelled": sms.emergency_off("turned off from the dashboard")}
+    if act == "on":
+        st = sms.status()
+        if not (st["provider_ready"] and st["owner"]):
+            return {"ok": False, "message": "; ".join(r for r in st["reasons"] if "is off" not in r)}
+        sms.set_option("enabled", True)
+        return {"ok": True}
+    if act == "test":
+        res = sms.send_test(rid or "me")
+        if res["status"] == "QUEUED":
+            sms.tick(only=res["id"])
+        m = next((x for x in sms.messages(50) if x["id"] == res["id"]), None) if res.get("id") else None
+        return {"ok": True, "status": (m or res)["status"], "detail": (m or {}).get("detail") or res.get("reason", "")}
+    return {"ok": False, "message": "unknown action"}
+
+
 # ------------------------------------------------------------------ outreach queue (drafts for potential clients)
 
 def outreach_queue() -> dict:

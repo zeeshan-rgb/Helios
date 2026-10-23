@@ -429,6 +429,14 @@ def tick(now: datetime | None = None, emit=None) -> str:
             calling.schedule(reason="Morning briefing", report_kind="morning", now=now)
     except Exception as e:  # pragma: no cover
         conf.log("briefing", f"executive record / call failed: {e}")
+    try:                                   # short SMS notice for recipients who want the morning briefing
+        from . import sms
+        b = out["briefing"]
+        pl = b.get("pipeline") or {}
+        sms.notify("morning_briefing", f"{pl.get('qualified', 0)} new leads, {len(b.get('decisions') or [])} items "
+                                       "need your decision", dedupe_key=f"briefing:{today}")
+    except Exception as e:  # pragma: no cover
+        conf.log("briefing", f"sms briefing notice failed: {e}")
     try:
         from . import jobs
         jobs.record_system_run("morning_briefing", "ok",

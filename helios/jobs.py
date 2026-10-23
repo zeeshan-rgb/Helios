@@ -237,6 +237,12 @@ def _finish_run(job: dict, run_id: int, status: str, summary: str,
         _notify(f"Helios paused the job '{job['name']}' after {fails} failures in a row.", emit)
     _update(job["id"], **fields)
     conf.log("jobs", f"{job['name']}: {status} — {summary[:160]}")
+    if status == "ok" and not job.get("system"):     # your own jobs → "task completion" SMS (batched)
+        try:
+            from . import sms
+            sms.notify("task_complete", f"Job '{job['name']}' finished", dedupe_key=f"job:{run_id}")
+        except Exception:  # pragma: no cover
+            pass
     if status == "failed" and fails >= 2:          # repeated failure → the owner hears about it once
         try:
             from . import executive

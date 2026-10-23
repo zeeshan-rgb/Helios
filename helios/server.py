@@ -366,6 +366,26 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError) as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode())
             return self._send(200, json.dumps({"ok": True, "item": pros.card(p)}, default=str).encode())
+        if path == "/tasks/start":
+            # Long Helios tools (business search, project checks) handed over by the brain's tool
+            # server: run in the background so the chat turn returns in seconds; the result is
+            # announced on the hub when it finishes. Same request while running → joins it.
+            from . import bg_tasks
+            body = self._json_body()
+            try:
+                res = bg_tasks.start(str(body.get("kind") or ""), body.get("args") or {}, publish=self.app["hub"].publish)
+            except (TypeError, ValueError) as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode())
+            return self._send(200, json.dumps(res).encode())
+        if path == "/sms/action":
+            # Your clicks in the SMS section (token + origin checked above): approve / cancel / opt-out /
+            # categories / test / on / off. Only people you added can ever be texted.
+            from . import dashboard, sms
+            try:
+                res = dashboard.sms_action(self._json_body())
+            except (TypeError, ValueError, sms.SMSError) as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode())
+            return self._send(200 if res.get("ok") else 400, json.dumps(res, default=str).encode())
         if path == "/exec/action":
             # The user's clicks in the Reports pane (token + origin checked above): mark reviewed,
             # snooze, cancel a scheduled call, build a report. Nothing here contacts anyone.
@@ -671,6 +691,8 @@ class Handler(BaseHTTPRequestHandler):
             data = {"text": dashboard.night_report()}
         elif name == "outreach":
             data = dashboard.outreach_queue()
+        elif name == "sms":
+            data = dashboard.sms_view()
         elif name == "exec":
             data = dashboard.executive_view(one("range") or "today", one("from"), one("to"), one("cat") or "all")
         elif name == "exec_report":

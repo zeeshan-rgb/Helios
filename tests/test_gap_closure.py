@@ -273,6 +273,7 @@ def test_sleep_during_a_task_is_recorded(tmp_path, monkeypatch):
 def test_overpass_falls_back_on_busy_servers_only(monkeypatch):
     import urllib.error
     monkeypatch.setattr(conf, "SETTINGS", {**conf.SETTINGS, "prospecting": {}})
+    monkeypatch.setattr(geo, "_down", {})
     hits = []
 
     def fetch(url, data=None, timeout=60):
@@ -282,10 +283,14 @@ def test_overpass_falls_back_on_busy_servers_only(monkeypatch):
         return {"elements": [{"id": 1}]}
     assert geo._overpass("[out:json];", fetch=fetch, sleep=lambda s: None) == {"elements": [{"id": 1}]}
     assert hits == [geo.OVERPASS, "https://overpass.private.coffee/api/interpreter"]
+    hits.clear()                                                        # the failed instance now goes last
+    geo._overpass("[out:json];", fetch=fetch, sleep=lambda s: None)
+    assert hits == ["https://overpass.private.coffee/api/interpreter"]
 
     def bad_query(url, data=None, timeout=60):
         hits.append(url)
         raise urllib.error.HTTPError(url, 400, "Bad Request", {}, None)
+    geo._down.clear()
     hits.clear()
     with pytest.raises(urllib.error.HTTPError):
         geo._overpass("broken", fetch=bad_query, sleep=lambda s: None)

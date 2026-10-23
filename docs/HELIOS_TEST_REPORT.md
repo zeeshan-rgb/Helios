@@ -13,6 +13,34 @@ $env:HELIOS_LIVE_BROWSER = "1"      # also run the real headless-Edge test
 |---|---|---|---|---|---|---|
 | Baseline, before the audit (2026-10-14) | 1033 | 1033 | 0 | 0 | 58 | 120 s |
 | After all audit fixes (2026-10-19) | **1057** | **1057** | **0** | **0** | 59 | 168 s |
+| Baseline before SMS (2026-10-21) | 1136 | 1136 | 0 | 0 | 61 | — |
+| After SMS integration (2026-10-21) | **1176** | **1176** | **0** | **0** | 62 | 391 s |
+| After conversation reliability fixes (2026-10-23) | **1190** | **1189** | **0** | 1 | 63 | — |
+
+**Conversation reliability (2026-10-23):** `tests/test_conversation_fixes.py` adds 14 tests, all faked
+(no real agy, no network). They cover:
+- background tasks: run, announce, failure reported, same request joins, unknown kind refused;
+- MCP hand-off to the app, and the inline fallback;
+- tool details for the chat dropdown, with secrets redacted;
+- `consume_turn` ACTIVE→DONE events;
+- no silent re-run after tools ran;
+- stale-conversation retry kept;
+- context rotation with a recap.
+
+One expectation was updated in `test_antigravity.py`, because tool events now carry
+`{id, name, detail, state}`. The chat dropdown was checked visually on a throwaway server (:8799)
+with simulated events: expand, collapse, no console errors.
+
+**SMS (2026-10-21):**
+- `tests/test_sms.py` adds 40 tests, all mocked. Conftest blocks every real SMS HTTP call, so these
+  tests are **not** evidence of real delivery.
+- One regression appeared and was investigated:
+  `test_security_acceptance::test_there_is_no_tool_that_messages_prospects_or_leads` banned any
+  tool named `*sms*`. The test now checks what it was meant to guarantee, more strictly:
+  - SMS tools take no phone number;
+  - `send_sms` is ask, never YOLO, and blocked for background agents;
+  - no SMS on the public MCP server;
+  - WhatsApp, email-send and contact-lead tools are still banned.
 
 - **No tests were removed or weakened.** Two expectations were updated to match deliberate
   changes: the public MCP tool set (13 → 15 tools, earlier phase) and a hard-coded tool count

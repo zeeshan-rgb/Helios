@@ -1218,6 +1218,177 @@ def cmd_signature(args) -> int:
     return 0
 
 
+def cmd_sms(args) -> int:
+    """SMS to you and people YOU add (no Gmail needed): `helios sms [status | setup phone|exotel|twilio |
+    me <number> | add <name> <number> [--purpose ..] [--consent granted] [--categories a,b] [--no-approval] |
+    list | set <name> categories a,b | set <name> quiet 22:00-08:00 | set <name> approval on|off |
+    set <name> consent granted|revoked | optout <name> | optin <name> | remove <name> | test [name] |
+    send <name> <text...> | pending | approve <id> | cancel [id] | log | on | off]`.
+    Categories: critical, antigravity, task_complete, night_mode, morning_briefing, reminders,
+    project_alerts, reports. Credentials go in at hidden prompts (secrets.toml), never in chat."""
+    conf = _conf()
+    import getpass
+    import time as _t
+    from helios import sms
+    args = list(args or [])
+    action = args.pop(0).lower() if args else "status"
+
+    def opt(flag, default=None):
+        if flag in args:
+            i = args.index(flag)
+            v = args[i + 1] if i + 1 < len(args) else default
+            del args[i:i + 2]
+            return v
+        return default
+    try:
+        if action == "status":
+            st = sms.status()
+            print(f"SMS: {'READY' if st['ready'] else 'not ready'} - enabled={st['enabled']}, provider={st['provider']} "
+                  f"({'configured' if st['provider_ready'] else 'not configured'}), your number={st['owner'] or 'not set'}")
+            for r in st["reasons"]:
+                print(f"  - {r}")
+            print("  credentials: " + ", ".join(f"{k}={v}" for k, v in st["credentials"].items()))
+            if st["provider"] in ("exotel", "twilio"):
+                print("  DLT templates registered: " + (", ".join(k for k, v in st["dlt_templates"].items() if v) or "none"))
+        elif action == "setup" and args and args[0] in ("phone", "exotel", "twilio"):
+            kind = args[0]
+            if kind == "phone":
+                print("Install 'SMS Gateway for Android' (github.com/capcom6/android-sms-gateway releases) on your phone,")
+                print("turn on Local Server, keep it running. It shows the address, username and password.")
+                url = input("Gateway address (e.g. http://192.168.1.23:8080): ").strip().rstrip("/")
+                user = input("Username: ").strip()
+                pw = getpass.getpass("Password (hidden): ").strip()
+                if not (url.startswith(("http://", "https://")) and user and pw):
+                    print("Nothing saved (address must start with http:// and all three are needed).")
+                    return 1
+                for k, v in (("url", url), ("username", user), ("password", pw)):
+                    conf.set_secret("sms_gateway", k, v)
+            elif kind == "exotel":
+                vals = {k: (getpass.getpass(f"{k} (hidden): ") if k in ("api_token",) else input(f"{k}: ")).strip()
+                        for k in ("api_key", "api_token", "account_sid", "sender_id", "dlt_entity_id")}
+                vals["subdomain"] = input("API host [api.exotel.com]: ").strip() or "api.exotel.com"
+                if not all(vals.values()):
+                    print("Nothing saved (all fields are needed).")
+                    return 1
+                for k, v in vals.items():
+                    conf.set_secret("exotel", k, v)
+            else:
+                frm = input("Twilio SMS-capable number (E.164) or Messaging Service SID (MG...): ").strip()
+                conf.set_secret("twilio", "messaging_service_sid" if frm.startswith("MG") else "sms_from", frm)
+                print("(Account SID / auth token: `helios calling setup` stores them in [twilio].)")
+            sms.set_option("provider", kind)
+            print(f"Saved. Provider = {kind}. Next: helios sms me +91XXXXXXXXXX, then helios sms test")
+        elif action == "me" and args:
+            r = sms.get_recipient("me")
+            if r:
+                sms.remove_recipient(r["id"])
+            r = sms.add_recipient("Me", " ".join(args), owner=True, purpose="Helios owner")
+            print(f"Your number: {sms.mask(r['phone'])} - categories: {', '.join(r['categories']) or 'none'}")
+        elif action == "add" and len(args) >= 2:
+            purpose = opt("--purpose", "")
+            consent = opt("--consent", "pending")
+            cats = [c for c in (opt("--categories", "") or "").split(",") if c]
+            noapp = "--no-approval" in args
+            args = [a for a in args if a != "--no-approval"]
+            name, number = args[0], " ".join(args[1:])
+            if consent == "granted" and input(f"Confirm {name} AGREED to receive SMS from Helios? [y/N] ").strip().lower() != "y":
+                consent = "pending"
+            r = sms.add_recipient(name, number, purpose=purpose, consent=consent, categories=cats,
+                                  require_approval=not noapp, consent_note="confirmed by you in the CLI")
+            print(f"Added {r['name']} ({sms.mask(r['phone'])}) - consent {r['consent']}, categories "
+                  f"{', '.join(r['categories']) or 'none'}, {'needs your approval per message' if r['require_approval'] else 'automatic'}")
+        elif action == "list":
+            for r in sms.recipients():
+                flags = [("OWNER" if r["is_owner"] else f"consent:{r['consent']}"),
+                         "OPTED OUT" if r["opted_out"] else "", "" if r["enabled"] else "disabled",
+                         "approval" if (r["require_approval"] and not r["is_owner"]) else ""]
+                print(f"#{r['id']} {r['name']:<16} {sms.mask(r['phone']):<16} {' '.join(f for f in flags if f):<28} "
+                      f"{', '.join(r['categories']) or '-'}")
+        elif action == "set" and len(args) >= 3:
+            name, what, val = args[0], args[1].lower(), " ".join(args[2:])
+            if what == "categories":
+                r = sms.update_recipient(name, categories=[c.strip() for c in val.split(",") if c.strip()])
+            elif what == "quiet":
+                a, _, b = val.partition("-")
+                r = sms.update_recipient(name, quiet_start=a.strip(), quiet_end=b.strip())
+            elif what == "approval":
+                r = sms.update_recipient(name, require_approval=val.lower() in ("on", "yes", "true"))
+            elif what == "consent":
+                r = sms.update_recipient(name, consent=val.lower(), consent_note="updated by you in the CLI")
+            else:
+                print("set <name> categories|quiet|approval|consent <value>")
+                return 2
+            print(f"{r['name']}: categories {', '.join(r['categories']) or 'none'}, consent {r['consent']}")
+        elif action in ("optout", "optin") and args:
+            r = (sms.opt_out if action == "optout" else sms.opt_in)(" ".join(args))
+            print(f"{r['name']}: {'opted out - nothing will be sent' if r['opted_out'] else 'opted back in'}")
+        elif action == "remove" and args:
+            print("Removed." if sms.remove_recipient(" ".join(args)) else "No such recipient.")
+        elif action == "test":
+            who = " ".join(args) or "me"
+            r = sms.get_recipient(who)
+            if not r:
+                print("No such recipient (set your number with: helios sms me +91...)")
+                return 1
+            if input(f"Send ONE real test SMS to {r['name']} ({sms.mask(r['phone'])}) now? Type send: ").strip().lower() != "send":
+                print("Not sent.")
+                return 0
+            res = sms.send_test(r["id"])
+            if res["status"] != "QUEUED":
+                print(f"Not sent: {res['status']} - {res['reason']}")
+                return 1
+            sms.tick(only=res["id"])
+            for _ in range(10):
+                m = next(x for x in sms.messages(200) if x["id"] == res["id"])
+                if m["status"] in ("DELIVERED", "FAILED"):
+                    break
+                _t.sleep(3)
+                sms.tick(only=res["id"])
+            m = next(x for x in sms.messages(200) if x["id"] == res["id"])
+            print(f"Test SMS #{m['id']}: {m['status']} - {m['detail']}")
+            return 0 if m["status"] in ("DELIVERED", "SENT_TO_PROVIDER") else 1
+        elif action == "send" and len(args) >= 2:
+            r = sms.get_recipient(args[0])
+            text = " ".join(args[1:])
+            if not r:
+                print("No such recipient - only people you added can get SMS.")
+                return 1
+            if input(f"Send to {r['name']} ({sms.mask(r['phone'])}): \"{sms.render('message', text)[1]}\" ? Type send: "
+                     ).strip().lower() != "send":
+                print("Not sent.")
+                return 0
+            res = sms.send_now(r["id"], text, origin="you (CLI)")
+            print(f"#{res['id']}: {res['status']} {res['reason']}")
+        elif action == "pending":
+            for m in sms.messages(100, status_in=("APPROVAL_REQUIRED", "QUEUED", "RETRY_SCHEDULED")):
+                print(f"#{m['id']} {m['status']:<17} {m['recipient']:<14} {m['category']:<16} {m['body'][:70]}")
+        elif action == "approve" and args:
+            m = sms.approve(int(args[0]))
+            print(f"#{m['id']} approved - queued for {m['recipient']}")
+        elif action == "cancel":
+            print(f"Cancelled {sms.cancel(int(args[0]) if args else None)} message(s).")
+        elif action == "log":
+            for m in sms.messages(25):
+                print(f"#{m['id']} {m['created'][:16]} {m['status']:<17} {m['recipient']:<12} {m['category']:<15} "
+                      f"{(m['detail'] or m['body'])[:70]}")
+        elif action == "on":
+            st = sms.status()
+            if not (st["provider_ready"] and st["owner"]):
+                print("Can't turn on yet: " + "; ".join(r for r in st["reasons"] if "is off" not in r))
+                return 1
+            sms.set_option("enabled", True)
+            print("SMS on. Emergency stop any time: helios sms off")
+        elif action == "off":
+            print(f"SMS OFF. {sms.emergency_off()} pending message(s) cancelled.")
+        else:
+            print(cmd_sms.__doc__.split(":", 1)[1].strip())
+            return 2
+    except (sms.SMSError, ValueError) as e:
+        print(e)
+        return 1
+    return 0
+
+
 def cmd_research(args) -> int:
     """Research: `helios research [topics | run [topic ...] | findings [topic] [--days N] |
     show <id> | keep <id>]`. `keep` copies one finding into memory (findings never go there
@@ -1283,6 +1454,7 @@ _COMMANDS = {
     "calling": cmd_calling,
     "telegram": cmd_telegram,
     "signature": cmd_signature,
+    "sms": cmd_sms,
 }
 
 _USAGE = ("Helios - usage: helios <command>\n"
@@ -1314,6 +1486,7 @@ _USAGE = ("Helios - usage: helios <command>\n"
           "  calling       spoken briefings to YOU (Telegram voice or Twilio call): test / on / off / log / cancel\n"
           "  telegram      your own Helios bot: setup / test / status\n"
           "  signature     your email signature for outreach: setup / image / show\n"
+          "  sms           SMS to you + people you add (phone gateway / Exotel / Twilio): setup / me / add / test / on / off\n"
           "  uninstall remove Helios (folder, task, PATH); --purge also deletes vault + caches")
 
 

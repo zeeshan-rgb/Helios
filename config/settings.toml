@@ -50,6 +50,7 @@ light = "gemini-3.8-flash-low"
 medium = "gemini-3.8-flash-medium"
 heavy = "claude-opus-4-6-thinking"   # was gemini-3.1-pro-high (not offered by the account); verified 2026-10-19
 digest_chars = 4000     # cap on the per-turn memory digest (it stays in the conversation = quota)
+rotate_context_tokens = 120000   # when a chat's context passes this, continue in a fresh session with a recap (speed); 0 = off
 # Post-turn memory extraction costs one extra agy run per reply (~24k input tokens of agy's own
 # system prompt). Off until the Phase 4 memory work adds a cheaper path.
 memory_writeback = false
@@ -479,3 +480,53 @@ critical_in_quiet_hours = false
 max_attempts = 2                  # critical calls only are retried
 retry_minutes = 10
 voice = "Polly.Brian"
+
+[sms]
+# SMS to YOU and people YOU add (they don't need Gmail or Telegram). docs/HELIOS_SMS_INTEGRATION.md
+# Providers: "phone" = your own Android phone sends from your SIM via the free "SMS Gateway for Android"
+# app (no Twilio, no DLT; `helios sms setup phone`) · "exotel" / "twilio" = paid providers (India needs
+# DLT registration of your sender ID + templates). Recipients, consent and opt-outs live in Helios's
+# private database (`helios sms add ...`), never in this file. Emergency stop: `helios sms off`.
+enabled = false
+provider = "phone"
+owner_categories = ["critical"]   # what YOU get by SMS by default: critical alerts only
+max_per_day = 10                  # per recipient (critical alerts are exempt)
+max_per_hour_total = 20
+min_gap_minutes = 5
+quiet_hours_start = "22:00"       # non-critical SMS wait until quiet hours end
+quiet_hours_end = "08:00"
+critical_in_quiet_hours = false
+max_attempts = 3                  # bounded retries for temporary failures
+retry_minutes = [2, 10, 30]
+batch_minutes = 30                # routine "task finished" updates are combined into one SMS
+batch_categories = ["task_complete"]
+fallback = true                   # if Telegram didn't reach you, SMS you for these severities
+fallback_severities = ["CRITICAL", "HIGH"]
+max_chars = 300
+
+# Message templates. For Exotel/Twilio to Indian numbers, register each text EXACTLY as written on the
+# DLT portal and paste its template id; with the phone gateway no registration is needed.
+[sms.templates.alert]
+text = "HELIOS ALERT: {#var#}. Open Helios for details."
+dlt_template_id = ""
+[sms.templates.morning_briefing]
+text = "Good morning. Your Helios report is ready: {#var#}. Review it in your dashboard."
+dlt_template_id = ""
+[sms.templates.night_mode]
+text = "HELIOS: Night Mode finished: {#var#}. View the report for details."
+dlt_template_id = ""
+[sms.templates.report]
+text = "HELIOS: Your {#var#} is ready. Open Helios to review it."
+dlt_template_id = ""
+[sms.templates.task_complete]
+text = "HELIOS: {#var#}. Open Helios for details."
+dlt_template_id = ""
+[sms.templates.reminder]
+text = "HELIOS reminder: {#var#}"
+dlt_template_id = ""
+[sms.templates.message]
+text = "HELIOS: {#var#}"
+dlt_template_id = ""
+[sms.templates.test]
+text = "HELIOS: test message. SMS alerts are working."
+dlt_template_id = ""

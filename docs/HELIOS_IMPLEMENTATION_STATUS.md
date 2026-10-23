@@ -21,6 +21,17 @@ Regression: **1057 tests, 0 failures, 0 skipped** after the final audit (with
 > - The voice loop ran end to end (TTS → STT → brain → TTS); only the physical mic and speaker
 >   weren't exercised.
 > - Eleven defects were fixed; see the audit.
+> - **Conversation reliability (2026-10-23):**
+>   - The business search and project checks now run as **background tasks**. The agent's
+>     ~1-minute tool timeout used to make chat say "agy failed", and the retry then ran the
+>     search twice. Results now arrive in chat, the dashboard, toast and SMS.
+>   - A turn is never silently re-run after tools ran.
+>   - Overpass fails over faster, with a 30 s timeout and unhealthy mirrors skipped for 10 min.
+>   - Long chats continue in a fresh session with a recap once they pass
+>     `rotate_context_tokens` (120k).
+>   - Chat activity rows expand to show the file, command or arguments.
+>   - Status: tests pass and the UI was checked on a throwaway server. **Not yet run live**;
+>     this needs a Helios restart.
 
 ## Acceptance criteria (spec §29)
 
@@ -74,17 +85,21 @@ Regression: **1057 tests, 0 failures, 0 skipped** after the final audit (with
 | Scraping | clean extraction, render-when-needed, provenance, cache, robots, bot walls reported | **DONE** | HELIOS_WEB_SCRAPING.md |
 | Research | nightly topics, sourced findings, separate library | **DONE** | see F |
 | Leads | worldwide paid-work leads, rate-card prices, pitch drafts, never contacts | **PARTIAL** | see G |
-| Prospecting | OSM discovery, website audit, scores, packages, quotes, drafts, approval queue | **DONE** (engine) / **BLOCKED** (running) | HELIOS_BUSINESS_PROSPECTING.md — off until you set areas + ₹ pricing |
+| Prospecting | OSM discovery, website audit, scores, packages, quotes, drafts, approval queue | **DONE** — enabled (Mehdipatnam, 2 km) | HELIOS_BUSINESS_PROSPECTING.md — quotes say NEEDS USER PRICING until you fill `[prospecting.pricing]` |
+| Outreach | read the draft → Approve & send from your Gmail → CONTACTED with the Gmail message id; dark signature card; call notes for phone-only leads | **DONE** (tested, mocked) / not yet sent live | dashboard Gmail drawer · `helios prospects send <id>` |
+| Executive reporting | event queue (severity, dedupe), midday / end-of-day / weekly / Night Mode reports, Reports dashboard | **DONE** | HELIOS_EXECUTIVE_REPORTING.md |
+| Briefings to your phone | Telegram voice messages in Helios's voice (verified with a test); Twilio calls built but off | **DONE** (Telegram) / **BLOCKED** (Twilio — no number on a trial) | HELIOS_EXECUTIVE_REPORTING.md |
+| SMS | texts to you + people you add (consent, opt-out, approval), phone-gateway / Exotel / Twilio providers, routing, limits, retries, delivery states, emergency off, dashboard section | **IMPLEMENTED — NOT VERIFIED** / **BLOCKED BY USER SETUP** (no provider yet) | HELIOS_SMS_INTEGRATION.md |
 | Memory | categories incl. leads/browsing/screen, secrets refused, duplicates merged, learning with approval | **DONE** | HELIOS_MEMORY.md |
 | Night Mode | schedule, isolation, reports, missed/interrupted nights, power-aware | **DONE** | HELIOS_NIGHT_MODE.md |
 | | nights actually running | **BLOCKED** | Helios must be running (PC awake) 01:00–05:00; the last three nights were missed for that reason |
 | Morning briefing | written + spoken | **DONE** | HELIOS_NIGHT_MODE.md |
 | Antigravity | persistent session, gate proof, tamper kill, research mode, usage measured | **DONE** | HELIOS_ANTIGRAVITY.md |
 | | provider quota / context window | **not exposed** by agy — shown as such, never guessed | HELIOS_ANTIGRAVITY.md |
-| | heavy tier model | **BLOCKED** | `gemini-3.1-pro-high` isn't offered by your account — change `[antigravity].heavy` |
+| | heavy tier model | **DONE** | set to `claude-opus-4-6-thinking` (verified with agy) |
 | MCP | internal server (99 tools), public server (15 curated, gated, rate-limited) | **DONE** | HELIOS_MCP.md |
 | | Helios tools inside the Antigravity IDE | **BLOCKED** | your call: run the command from `helios mcp antigravity` |
-| Gmail | read + draft replies to business contacts; send only on your approval | **BLOCKED** | built + tested; needs `helios gmail setup <client.json>` + `helios gmail login` |
+| Gmail | read + draft replies to business contacts; send only on your approval | **DONE** — connected (live read verified) | the Google app is in Testing mode: sign-in expires every 7 days until it's published |
 | Polarion | read-only search / items | **BLOCKED** | built + tested; needs `helios polarion token local` (and `server_url` + token for the server) |
 | Dashboard | three-column UI, live data only, model limits, real-state robot, approvals | **DONE** | HELIOS_DASHBOARD_UI.md — verified on a test server; shows in the app after `helios restart` |
 | Performance | hardware detection, lazy loading, models on D:, OCR on demand, browser idle-close | **DONE** | HELIOS_ARCHITECTURE.md |
@@ -95,15 +110,14 @@ Regression: **1057 tests, 0 failures, 0 skipped** after the final audit (with
 1. **Keep Helios running overnight** (PC awake, `helios start`) so Night Mode runs — research, leads
    and prospecting get their live runs; also plug in the laptop (heavy tasks skip below 30 %
    battery).
-2. **Fix the heavy model:** set `[antigravity].heavy` to an offered model (e.g.
-   `"gemini-3.8-flash-high"` or `"claude-opus-4-6-thinking"`; list: `agy models`).
-3. `helios restart` (when you're not mid-conversation) — loads the final audit's server-side fixes
-   (briefing, Night Mode, prospecting reliability, Night indicator).
+2. `helios restart` (when you're not mid-conversation) — loads everything built since the last
+   restart (outreach Approve & send, signature, map, executive reporting, SMS).
+3. **SMS:** install *SMS Gateway for Android* on your phone → `helios sms setup phone` →
+   `helios sms me +91…` → `helios sms test` → `helios sms on` (HELIOS_SMS_INTEGRATION.md).
 4. **Wake word:** train "hey Helios" and drop it at `D:\Helios\data\wake\hey_helios.onnx`
    (steps in `HELIOS_SETUP.md`). Optional: enroll your voice for the voice lock.
-5. **Prospecting:** `[prospecting] enabled = true`, your areas, and ₹ prices in
-   `[prospecting.pricing]`.
-6. **Gmail:** Google Cloud desktop client → `helios gmail setup <client.json>` → `helios gmail login`.
+5. **Prospecting prices:** ₹ ranges in `[prospecting.pricing]` (areas are set).
+6. **Gmail:** publish the Google app so the sign-in stops expiring every 7 days.
 7. **Polarion:** `helios polarion token local` (and `server_url` + `helios polarion token server`).
 8. Optional: register Helios in Antigravity (`helios mcp antigravity`).
 

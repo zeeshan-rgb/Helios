@@ -90,6 +90,11 @@ class Scheduler:
             db.mark_reminder_fired(r["id"])
             notify.toast("⏰ Reminder", r["text"])
             self.emit("status", f"⏰ Reminder: {r['text']}")
+            try:                                    # SMS for recipients who enabled reminders
+                from . import sms
+                sms.notify("reminders", r["text"], dedupe_key=f"reminder:{r['id']}")
+            except Exception as e:  # pragma: no cover
+                conf.log("scheduler", f"sms reminder failed: {e}")
 
         # 2) due routines -> side-agent pool (run in parallel; never blocks the chat)
         for rt in db.due_routines(now_iso):
